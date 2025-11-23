@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: ./backend
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - ./data:/app/data
+    ports:
+      - "2100:2100"
+    environment:
+      - NODE_ENV=development
+
+  frontend:
+    build: 
+      context: ./frontend
+      target: base # <--- UPDATED: Only build the 'base' stage (skips npm run build)
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host --port 2101
+    ports:
+      - "2101:2101"
+    environment:
+      - VITE_API_URL=http://localhost:2100/api
+    depends_on:
+      - backend

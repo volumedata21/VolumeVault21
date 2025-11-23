@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data # Persist data outside container
+    command: sh -c "npm init -y && npm install express cors && node server.js"
+    ports:
+      - "3001:3001"
+    restart: always
+
+  # Frontend Web App Service
+  frontend:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    # In production, you'd build the React app. 
+    # For development/simple setup, we use Vite/CRA dev server or a static serve.
+    # This command assumes a standard Vite setup.
+    command: sh -c "npm install && npm run dev -- --host"
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3001/api
+    depends_on:
+      - backend
