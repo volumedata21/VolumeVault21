@@ -116,8 +116,8 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, 'dist')));
     
-    // FIX: Changed '*' to '(.*)' for Express 5 compatibility
-    app.get('(.*)', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
+    // FIX: Use '/*' as the route path for Express 5 catch-all
+    app.get('/*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
 }
 
 app.listen(PORT, '0.0.0.0', () => {
