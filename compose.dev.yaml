@@ -1,29 +1,12 @@
-version: '3.8'
-
 services:
-  backend:
-    build: 
-      context: ./backend
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
-      - ./data:/app/data
+  app:
+    build: .
     ports:
-      - "2100:2100"
-    environment:
-      - NODE_ENV=development
-
-  frontend:
-    build: 
-      context: ./frontend
-      target: base # <--- UPDATED: Only build the 'base' stage (skips npm run build)
+      - "2100:2100" # Map 2100 on host to 2100 in container
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: npm run dev -- --host --port 2101
-    ports:
-      - "2101:2101"
+      - .:/app # Syncs your local folder to the container workdir
+      - /app/node_modules # Prevents local node_modules from overwriting container's
     environment:
-      - VITE_API_URL=http://localhost:2100/api
-    depends_on:
-      - backend
+      - VITE_API_KEY=${API_KEY}
+      - CHOKIDAR_USEPOLLING=true # Often needed for HMR on Windows/WSL/Linux
+    restart: unless-stopped
