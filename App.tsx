@@ -120,7 +120,8 @@ export default function App() {
              if (prevNote) await noteService.saveNote(prevNote);
         }
         setCurrentNoteId(id);
-        setIsSidebarOpen(false);
+        // FIX 2: Ensure sidebar closes immediately to prevent mobile screen lock
+        setIsSidebarOpen(false); 
     };
 
     const handleDeleteNote = async (id: string) => {
@@ -188,7 +189,6 @@ export default function App() {
 
     const displayedNote = getCurrentNote();
     
-    // Determine if the current note is deleted (to show the Restore UI)
     const isNoteInTrash = displayedNote?.isDeleted && viewMode === 'all';
 
 
@@ -200,19 +200,19 @@ export default function App() {
                 onSelectNote={handleNoteSelect}
                 onCreateNote={handleCreateNote}
                 onDeleteNote={handleDeleteNote}
-                onRestoreNote={handleRestoreNote} // Pass new function
-                onEmptyTrash={handleEmptyTrash}     // Pass new function
+                onRestoreNote={handleRestoreNote}
+                onEmptyTrash={handleEmptyTrash}
                 isOpen={isSidebarOpen}
                 onCloseMobile={() => setIsSidebarOpen(false)}
                 onExport={handleExport}
                 onOpenSettings={() => setIsSettingsOpen(true)}
-                viewMode={viewMode}                 // Pass new state
-                onViewModeChange={setViewMode}      // Pass new setter
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
             />
 
             <div className="flex-1 flex flex-col min-w-0">
-                {/* Mobile Header */}
-                <div className="md:hidden flex items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+                {/* Mobile Header - FIX 1: Added z-20 class to keep it on top of the editor */}
+                <div className="md:hidden flex items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 relative z-20">
                     <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 mr-2 text-gray-600 dark:text-gray-400">
                         <Menu size={24} />
                     </button>
@@ -224,7 +224,6 @@ export default function App() {
                         note={displayedNote}
                         onChange={handleUpdateNoteState}
                         onSave={handleManualSaveCurrent}
-                        // Only allow deletion if not already in trash
                         onDelete={() => handleDeleteNote(currentNoteId)} 
                         settings={settings}
                         availableCategories={availableCategories}
