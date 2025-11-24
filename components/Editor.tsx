@@ -53,7 +53,9 @@ export const Editor: React.FC<EditorProps> = ({
       filter: 'input',
       replacement: function (_content: any, node: any) {
           if (node.type === 'checkbox') {
-              return node.checked ? '[x] ' : '[ ] ';
+              // Read the actual attribute to ensure persistence works
+              const isChecked = node.hasAttribute('checked') || node.checked;
+              return isChecked ? '[x] ' : '[ ] ';
           }
           return '';
       }
@@ -83,9 +85,16 @@ export const Editor: React.FC<EditorProps> = ({
         }
 
        if (task) {
+         const cleanText = text.replace(/^<input[^>]+>/, '').trim();
+         
+         // ALIGNMENT FIX: 
+         // margin-top: 0.35rem pushes the box down to match the text baseline.
+         // We also ensure the input has the 'checked' attribute explicitly if true.
+         const checkedAttr = checked ? 'checked="checked"' : '';
+         
          return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
-           <input type="checkbox" ${checked ? 'checked' : ''} style="margin-top: 0.25rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
-           <span style="flex: 1; min-width: 0; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${text}</span>
+           <input type="checkbox" ${checkedAttr} style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
+           <span style="flex: 1; min-width: 0; line-height: 1.5; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${cleanText}</span>
          </li>`;
        }
        return `<li>${text}</li>`;
@@ -192,21 +201,16 @@ export const Editor: React.FC<EditorProps> = ({
     }
     document.execCommand(command, false, value);
     
-    // Improved logic: If creating a block element, insert a spacer below it to allow exit
     if (command === 'formatBlock' && (value === '<pre>' || value === '<blockquote>')) {
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
             let node = selection.anchorNode as Node | null;
-            
-            // Traverse up to find the block element
             while (node && node.nodeName !== 'PRE' && node.nodeName !== 'BLOCKQUOTE' && node !== contentEditableRef.current) {
                 node = node.parentNode;
             }
 
             if (node && (node.nodeName === 'PRE' || node.nodeName === 'BLOCKQUOTE')) {
                 const blockNode = node as HTMLElement;
-                
-                // Always ensure there is a paragraph after the block
                 const p = document.createElement('p');
                 p.innerHTML = '<br>';
                 
@@ -218,7 +222,6 @@ export const Editor: React.FC<EditorProps> = ({
             }
         }
     }
-
     handleVisualInput();
   };
 
@@ -245,13 +248,15 @@ export const Editor: React.FC<EditorProps> = ({
                 
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
-                checkbox.style.marginTop = '0.25rem';
+                // ALIGNMENT FIX
+                checkbox.style.marginTop = '0.35rem';
                 checkbox.style.marginRight = '0.5rem';
                 checkbox.style.flexShrink = '0';
                 
                 const span = document.createElement('span');
                 span.style.flex = '1';
                 span.style.minWidth = '0';
+                span.style.lineHeight = '1.5';
                 
                 while (li.firstChild) {
                     span.appendChild(li.firstChild);
@@ -277,14 +282,19 @@ export const Editor: React.FC<EditorProps> = ({
     handleVisualInput();
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('image', file);
+
+    try {
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error('Upload failed');
         
-        // Restore selection or focus before inserting
+        const data = await res.json();
+        
         if (savedSelection.current) {
             const sel = window.getSelection();
             sel?.removeAllRanges();
@@ -292,12 +302,12 @@ export const Editor: React.FC<EditorProps> = ({
         } else {
             contentEditableRef.current?.focus();
         }
-
-        execCmd('insertImage', base64);
-      };
-      reader.readAsDataURL(file);
+        
+        execCmd('insertImage', data.url);
+    } catch (err) {
+        console.error(err);
+        alert('Failed to upload image');
     }
-    // Reset input
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -307,6 +317,15 @@ export const Editor: React.FC<EditorProps> = ({
         const checkbox = target as HTMLInputElement;
         const li = checkbox.closest('li');
         const span = li?.querySelector('span');
+
+        // PERSISTENCE FIX: 
+        // We must manually update the HTML attribute 'checked' so Turndown sees it.
+        // JS 'checked' property is not enough for innerHTML export.
+        if (checkbox.checked) {
+            checkbox.setAttribute('checked', 'checked');
+        } else {
+            checkbox.removeAttribute('checked');
+        }
 
         setTimeout(() => {
             if (checkbox.checked) {
@@ -435,13 +454,15 @@ export const Editor: React.FC<EditorProps> = ({
                 
                 const newCheckbox = document.createElement('input');
                 newCheckbox.type = 'checkbox';
-                newCheckbox.style.marginTop = '0.25rem';
+                // ALIGNMENT FIX
+                newCheckbox.style.marginTop = '0.35rem';
                 newCheckbox.style.marginRight = '0.5rem';
                 newCheckbox.style.flexShrink = '0';
                 
                 const newSpan = document.createElement('span');
                 newSpan.style.flex = '1';
                 newSpan.style.minWidth = '0';
+                newSpan.style.lineHeight = '1.5';
                 newSpan.innerHTML = '<br>'; 
                 
                 newLi.appendChild(newCheckbox);
@@ -587,7 +608,6 @@ export const Editor: React.FC<EditorProps> = ({
               if (url) execCmd('createLink', url);
           }} />
           <ToolbarBtn icon={ImageIcon} label="Image" onClick={() => {
-              // Save selection before opening dialog
               const sel = window.getSelection();
               if (sel && sel.rangeCount > 0) {
                   savedSelection.current = sel.getRangeAt(0);
@@ -616,15 +636,12 @@ export const Editor: React.FC<EditorProps> = ({
                   const content = contentEditableRef.current;
                   if (!content) return;
 
-                  // Logic to break out of block elements when clicking below them
                   const lastChild = content.lastElementChild;
                   if (lastChild && (lastChild.nodeName === 'PRE' || lastChild.nodeName === 'BLOCKQUOTE')) {
-                      // Insert new paragraph
                       const p = document.createElement('p');
                       p.innerHTML = '<br>';
                       content.appendChild(p);
                       
-                      // Move cursor to it
                       const range = document.createRange();
                       range.setStart(p, 0);
                       range.collapse(true);

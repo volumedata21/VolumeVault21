@@ -1,18 +1,20 @@
-# Dockerfile
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy the definition files
 COPY package.json package-lock.json* ./
 
-# Install ALL dependencies (including marked/turndown) in one go
-# This is cleaner and caches better
+# Install dependencies (including express/multer)
 RUN npm install --legacy-peer-deps
 
-# Copy the app source
+# Copy source
 COPY . .
 
+# Build the React Frontend (creates /dist folder)
+RUN npm run build
+
+# Expose port
 EXPOSE 2100
 
-CMD ["npm", "run", "dev", "--", "--host"]
+# Start the custom server
+CMD ["node", "server.js"]

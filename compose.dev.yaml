@@ -1,12 +1,15 @@
 services:
   app:
     build: .
+    # ADD THIS LINE BELOW:
+    command: ["npm", "run", "dev"]
     ports:
-      - "2100:2100" # Map 2100 on host to 2100 in container
+      - "2100:2100" # Vite Dev Server (Frontend)
+      - "2101:3000" # API Server (Backend)
     volumes:
-      - .:/app # Syncs your local folder to the container workdir
-      - /app/node_modules # Prevents local node_modules from overwriting container's
+      - .:/app
+      - /app/node_modules
+      - ./data:/data
     environment:
       - VITE_API_KEY=${API_KEY}
-      - CHOKIDAR_USEPOLLING=true # Often needed for HMR on Windows/WSL/Linux
     restart: unless-stopped

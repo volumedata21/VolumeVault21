@@ -36,6 +36,16 @@ export default defineConfig({
     },
     watch: {
         usePolling: true
+    },
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3000', // CHANGED: localhost -> 127.0.0.1
+        changeOrigin: true
+      },
+      '/uploads': {
+        target: 'http://127.0.0.1:3000', // CHANGED: localhost -> 127.0.0.1
+        changeOrigin: true
+      }
     }
   }
 });
