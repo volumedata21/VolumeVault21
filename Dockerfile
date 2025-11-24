@@ -5,6 +5,10 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
+# FIX: Delete the lockfile to force npm to download the correct Linux binaries
+# This fixes the "Cannot find module @rollup/rollup-linux-x64-musl" error
+RUN rm -f package-lock.json
+
 # Install dependencies (legacy-peer-deps handles the React 19 conflict)
 RUN npm install --legacy-peer-deps
 
