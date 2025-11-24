@@ -7,14 +7,14 @@ export interface Note {
   updatedAt: number;
   tags: string[];
   synced?: boolean;
-  isDeleted?: boolean;
+  isDeleted?: boolean; // Must be present
 }
 
-export type ViewMode = 'edit' | 'preview' | 'split';
+export type ViewMode = 'all' | 'trash'; // <--- UPDATED: New View Mode Type
 
 export interface AppSettings {
   autoSave: boolean;
-  saveInterval: number;
+  saveInterval: number; // in milliseconds
   serverUrl?: string;
   serverApiKey?: string;
 }
