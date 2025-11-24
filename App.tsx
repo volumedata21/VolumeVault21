@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { SettingsModal } from './components/SettingsModal';
-import { Note, AppSettings } from './types';
+import { Note, AppSettings, ViewMode } from './types'; // Import ViewMode
 import { noteService } from './services/noteService';
 import { Menu } from 'lucide-react';
 
@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS: AppSettings = { autoSave: true, saveInterval: 30000 };
 const SETTINGS_KEY = 'volumevault_settings';
 const LEGACY_SETTINGS_KEY = 'markmind_settings';
 
-// FIX: Must define the BroadcastChannel outside the component so it persists.
+// Must define the BroadcastChannel outside the component so it persists.
 const SYNC_CHANNEL = new BroadcastChannel('volumevault-sync');
 
 export default function App() {
@@ -18,7 +18,8 @@ export default function App() {
     const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    
+    const [viewMode, setViewMode] = useState<ViewMode>('all'); // <--- NEW STATE
+
     // Load Settings
     const [settings, setSettings] = useState<AppSettings>(() => {
         try {
@@ -38,61 +39,52 @@ export default function App() {
         }
     });
 
-    // -------------------------------------------------------------------------
-    //  CORRECTED LOAD & SYNC LOGIC with Broadcast Channel
-    // -------------------------------------------------------------------------
-    
     // Function to fetch notes from IDB and update state
     const refreshNotes = async (preserveSelection = true) => {
         const loadedNotes = await noteService.getAllNotes();
         setNotes(loadedNotes);
         
-        // Only auto-select the first note on the very first load
-        if (!preserveSelection || (currentNoteId && !loadedNotes.find(n => n.id === currentNoteId))) {
-            setCurrentNoteId(loadedNotes.length > 0 ? loadedNotes[0].id : null);
-        } else if (!currentNoteId && loadedNotes.length > 0) {
-            setCurrentNoteId(loadedNotes[0].id);
+        // Logic to keep the current note selected, or select the first non-deleted note
+        if (!currentNoteId || !loadedNotes.find(n => n.id === currentNoteId)) {
+            const firstAvailable = loadedNotes.find(n => !n.isDeleted);
+            setCurrentNoteId(firstAvailable ? firstAvailable.id : null);
         }
     };
 
 
     useEffect(() => {
-        // 1. Initial Load
         refreshNotes(false);
 
-        // 2. Event Handlers for Background Sync
         const handleSync = () => {
             noteService.sync().then(() => refreshNotes(true));
         };
         
-        // NEW FIX: Listen for broadcasts from other tabs/devices
         const handleBroadcast = (event: MessageEvent) => {
-            if (event.data.type === 'LOCAL_UPDATE' || event.data.type === 'PULL_SUCCESS') {
-                console.log(`[Broadcast] Refreshing UI after external save/sync.`);
+            if (event.data.type === 'LOCAL_UPDATE' || event.data.type === 'PULL_SUCCESS' || event.data.type === 'SYNC_SUCCESS') {
                 refreshNotes(true);
-            } else if (event.data.type === 'SYNC_SUCCESS') {
-                // If a local note just successfully synced, trigger a full pull immediately
-                // to see if the server has anything else newer (e.g. from the desktop).
-                handleSync(); 
             }
         };
 
-        // 3. Listeners
         window.addEventListener('online', handleSync);
         window.addEventListener('focus', handleSync);
-        SYNC_CHANNEL.addEventListener('message', handleBroadcast); // <--- New Listener
+        SYNC_CHANNEL.addEventListener('message', handleBroadcast);
 
-        // 4. Cleanup
         return () => {
             window.removeEventListener('online', handleSync);
             window.removeEventListener('focus', handleSync);
             SYNC_CHANNEL.removeEventListener('message', handleBroadcast);
-            SYNC_CHANNEL.close(); // Close channel when component unmounts
+            SYNC_CHANNEL.close();
         };
     }, []);
-    // -------------------------------------------------------------------------
 
-    // Compute available categories from all notes
+    // Effect to auto-switch from 'trash' if trash becomes empty
+    useEffect(() => {
+        if (viewMode === 'trash' && notes.filter(n => n.isDeleted).length === 0) {
+            setViewMode('all');
+        }
+    }, [notes, viewMode]);
+
+
     const availableCategories = useMemo(() => {
         const cats = new Set(notes.map(n => n.category || 'General'));
         return Array.from(cats).sort();
@@ -119,6 +111,7 @@ export default function App() {
         setNotes(prev => [newNote, ...prev]);
         setCurrentNoteId(newNote.id);
         if (window.innerWidth < 768) setIsSidebarOpen(false);
+        setViewMode('all'); // Ensure we are looking at the new note
     };
 
     const handleNoteSelect = async (id: string) => {
@@ -131,18 +124,31 @@ export default function App() {
     };
 
     const handleDeleteNote = async (id: string) => {
-        if (confirm('Are you sure you want to delete this note?')) {
-            // Optimistically update UI immediately
-            const remaining = notes.filter(n => n.id !== id);
-            setNotes(remaining);
-            if (currentNoteId === id) {
-                setCurrentNoteId(remaining.length > 0 ? remaining[0].id : null);
-            }
-            
-            // Soft delete in background
+        if (confirm(`Are you sure you want to move "${notes.find(n => n.id === id)?.title || 'this note'}" to the Trash?`)) {
             await noteService.deleteNote(id);
+            // Re-fetch will hide the note and auto-select the next one.
+            refreshNotes();
         }
     };
+    
+    // NEW FUNCTION: Restore note from trash
+    const handleRestoreNote = async (id: string) => {
+        await noteService.restoreNote(id);
+        refreshNotes(true);
+        setViewMode('all');
+    };
+    
+    // NEW FUNCTION: Permanently delete notes
+    const handleEmptyTrash = async () => {
+        const trashCount = notes.filter(n => n.isDeleted).length;
+        if (trashCount === 0) return;
+        
+        if (confirm(`Are you sure you want to permanently delete all ${trashCount} items in the trash? This cannot be undone.`)) {
+            await noteService.emptyTrash();
+            refreshNotes(false);
+        }
+    };
+
 
     // Updates React State ONLY (Fast, for UI Sync)
     const handleUpdateNoteState = (updates: Partial<Note>) => {
@@ -156,7 +162,6 @@ export default function App() {
         }));
     };
 
-    // Persists to Disk (Async)
     const saveNoteToDisk = async (id: string) => {
         const noteToSave = notes.find(n => n.id === currentNoteId);
         if (noteToSave) {
@@ -181,6 +186,12 @@ export default function App() {
         downloadAnchorNode.remove();
     };
 
+    const displayedNote = getCurrentNote();
+    
+    // Determine if the current note is deleted (to show the Restore UI)
+    const isNoteInTrash = displayedNote?.isDeleted && viewMode === 'all';
+
+
     return (
         <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
             <Sidebar
@@ -189,10 +200,14 @@ export default function App() {
                 onSelectNote={handleNoteSelect}
                 onCreateNote={handleCreateNote}
                 onDeleteNote={handleDeleteNote}
+                onRestoreNote={handleRestoreNote} // Pass new function
+                onEmptyTrash={handleEmptyTrash}     // Pass new function
                 isOpen={isSidebarOpen}
                 onCloseMobile={() => setIsSidebarOpen(false)}
                 onExport={handleExport}
                 onOpenSettings={() => setIsSettingsOpen(true)}
+                viewMode={viewMode}                 // Pass new state
+                onViewModeChange={setViewMode}      // Pass new setter
             />
 
             <div className="flex-1 flex flex-col min-w-0">
@@ -204,12 +219,13 @@ export default function App() {
                     <span className="font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">VolumeVault21</span>
                 </div>
 
-                {currentNoteId ? (
+                {currentNoteId && displayedNote ? (
                     <Editor
-                        note={getCurrentNote()!}
+                        note={displayedNote}
                         onChange={handleUpdateNoteState}
                         onSave={handleManualSaveCurrent}
-                        onDelete={() => handleDeleteNote(currentNoteId)}
+                        // Only allow deletion if not already in trash
+                        onDelete={() => handleDeleteNote(currentNoteId)} 
                         settings={settings}
                         availableCategories={availableCategories}
                     />
