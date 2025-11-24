@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppSettings } from '../types';
-import { X, Save, Clock, Server, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
+import { X, Save, Clock, Server, RefreshCw, CheckCircle, XCircle, Download } from 'lucide-react'; // Added Download
 import { noteService } from '../services/noteService';
 
 interface SettingsModalProps {
@@ -8,6 +8,7 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: AppSettings;
   onUpdateSettings: (settings: AppSettings) => void;
+  onExport: () => void; // <--- ADDED PROP
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -15,9 +16,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   settings,
   onUpdateSettings,
+  onExport, // <--- Destructure
 }) => {
   const [isSyncing, setIsSyncing] = useState(false);
-  // syncStatus holds the confirmation message: "Sync complete!", "Sync failed."
   const [syncStatus, setSyncStatus] = useState<string>(''); 
 
   if (!isOpen) return null;
@@ -26,7 +27,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsSyncing(true);
     setSyncStatus('Syncing...');
     
-    // We use the new, integrated sync function from noteService
     try {
         await noteService.sync();
         setSyncStatus('Sync complete! Changes pulled from server.');
@@ -39,10 +39,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
   
+  const handleExportClick = () => {
+    onExport();
+    // Optional: Add a brief confirmation message in the modal if needed
+    // setSyncStatus('Backup downloaded!');
+    // setTimeout(() => setSyncStatus(''), 3000);
+  };
+
   const StatusMessage = () => {
       if (!syncStatus) return null;
       
-      const isSuccess = syncStatus.includes('complete');
+      const isSuccess = syncStatus.includes('complete') || syncStatus.includes('downloaded');
       const Icon = isSuccess ? CheckCircle : XCircle;
       const colorClass = isSuccess ? 'text-green-500' : 'text-red-500';
 
@@ -70,26 +77,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
         
         <div className="p-6 space-y-8 overflow-y-auto">
-          {/* Sync Section (Updated) */}
+          {/* Sync & Backup Section (Updated) */}
           <div className="space-y-4">
             <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
               <Server size={16} /> Sync & Backup
             </h3>
             
             <p className="text-sm text-gray-600 dark:text-gray-400">
-                Manually trigger synchronization with your server backend. This pushes local changes and pulls updates from other devices.
+                Manually trigger synchronization with your server backend.
             </p>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex flex-col gap-3">
                 <button 
                     onClick={handleSync}
                     disabled={isSyncing}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 transition-all"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 transition-all"
                 >
                     <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
-                    {isSyncing ? "Syncing..." : "Manual Sync Now"}
+                    {isSyncing ? "Syncing..." : "Sync Now"}
+                </button>
+                
+                {/* BACKUP BUTTON MOVED HERE */}
+                <button 
+                    onClick={handleExportClick}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg text-sm font-bold hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+                >
+                    <Download size={16} />
+                    Download JSON Backup
                 </button>
             </div>
+            
             <div className="text-right">
                 <StatusMessage />
             </div>
@@ -143,8 +160,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
           </div>
-          
-          {/* Old Sync Settings (Removed Server URL/API Key inputs as they are not used in your current architecture) */}
           
         </div>
 

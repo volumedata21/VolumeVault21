@@ -3,13 +3,14 @@ import { Note, AppSettings } from '../types';
 import { 
   Save, Check, Bold, Italic, Underline, Strikethrough, Heading1, Heading2, 
   List, ListOrdered, Code, Quote, Link as LinkIcon, Tag,
-  FileCode, Eye, CheckSquare, Image as ImageIcon, Undo, Redo, Trash2
-} from 'lucide-react';
+  FileCode, Eye, CheckSquare, Image as ImageIcon, Undo, Redo, Trash2, Copy
+} from 'lucide-react'; 
 // @ts-ignore
 import { marked } from 'marked';
 // @ts-ignore
 import TurndownService from 'turndown';
 
+// --- HISTORY TYPES ---
 interface HistoryState {
   content: string;
   title: string;
@@ -26,6 +27,24 @@ interface EditorProps {
   availableCategories: string[];
 }
 
+// Gold standard debouncing function for autosave/history
+const debounce = (func: Function, delay: number) => {
+    let timeoutId: NodeJS.Timeout | null;
+    return (...args: any) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+            func(...args);
+            timeoutId = null;
+        }, delay);
+    };
+};
+
+// Debounce for saving the entire note to disk/server (3 seconds)
+const debouncedSaveToDisk = debounce((saveFunc: () => void) => {
+    saveFunc();
+}, 3000); 
+
+
 export const Editor: React.FC<EditorProps> = ({ 
   note, 
   onChange, 
@@ -41,7 +60,8 @@ export const Editor: React.FC<EditorProps> = ({
   
   const [isDirty, setIsDirty] = useState(false);
   const [isSourceMode, setIsSourceMode] = useState(false);
-  
+  // isReadMode is removed from state, ensuring the editor is always editable.
+
   // --- HISTORY STATE ---
   const [history, setHistory] = useState<HistoryState[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -53,6 +73,7 @@ export const Editor: React.FC<EditorProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const savedSelection = useRef<Range | null>(null);
   const isInternalUpdate = useRef<NodeJS.Timeout | null>(null);
+  const isCheckboxClick = useRef(false);
 
   const isDefaultContent = useMemo(() => {
     if (isSourceMode) return currentContent.includes('# New Note') && currentContent.includes('Start writing here');
@@ -78,8 +99,39 @@ export const Editor: React.FC<EditorProps> = ({
     return service;
   }, []);
 
+  // --- CODE BLOCK AND CHECKLIST RENDERER (FINAL STABLE VERSION) ---
   useEffect(() => {
-     const renderer = new marked.Renderer();
+     
+     // Expose copy function globally so HTML onclick can access it
+     // @ts-ignore
+     window.copyCodeFromButton = (button: HTMLElement) => {
+         const targetId = button.getAttribute('data-code-target');
+         const preElement = document.getElementById(targetId!);
+         if (preElement) {
+             const code = preElement.querySelector('code')!.textContent || '';
+             
+             const tempTextArea = document.createElement('textarea');
+             tempTextArea.value = code;
+             document.body.appendChild(tempTextArea);
+             tempTextArea.select();
+             
+             const success = document.execCommand('copy');
+             document.body.removeChild(tempTextArea);
+             
+             const originalText = button.innerHTML;
+             button.innerHTML = success ? '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!' : 'Failed';
+             
+             setTimeout(() => {
+                 if (button.textContent && button.textContent.includes('Copied')) {
+                     button.innerHTML = originalText;
+                 }
+             }, 1500);
+         }
+     };
+
+    const renderer = new marked.Renderer();
+     
+     // 1. Checkbox List Renderer 
      // @ts-ignore
      renderer.listitem = function(item: any) {
         let text = '';
@@ -108,6 +160,32 @@ export const Editor: React.FC<EditorProps> = ({
        }
        return `<li>${text}</li>`;
      };
+     
+     // 2. Code Block Renderer
+     // @ts-ignore
+     renderer.code = function(code, language) {
+         const langDisplay = language || 'code';
+         const id = `code-${Math.random().toString(36).substring(2, 9)}`;
+
+         return `
+            <div class="relative group my-4 rounded-lg bg-gray-800 dark:bg-gray-900 shadow-md">
+                <div class="flex items-center justify-between px-4 py-2 bg-gray-700 dark:bg-gray-800 rounded-t-lg text-xs text-gray-400">
+                    <span>${langDisplay.toUpperCase()}</span>
+                    <button 
+                        data-code-target="${id}"
+                        class="text-gray-400 hover:text-white transition-colors flex items-center gap-1 p-1 rounded hover:bg-gray-700"
+                        onclick="window.copyCodeFromButton(this)"
+                        title="Copy code to clipboard"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        Copy
+                    </button>
+                </div>
+                <pre id="${id}" class="!p-4 !m-0 overflow-x-auto text-sm font-mono text-gray-200"><code>${code}</code></pre>
+            </div>
+         `;
+     };
+
      marked.use({ renderer, gfm: true });
   }, []);
 
@@ -120,6 +198,7 @@ export const Editor: React.FC<EditorProps> = ({
     setCategory(note.category || 'General');
     setCurrentContent(note.content);
     setIsDirty(false);
+    // isReadMode is implicitly false
     
     setHistory([{ 
         content: note.content, 
@@ -143,29 +222,37 @@ export const Editor: React.FC<EditorProps> = ({
           }
       }
   }, [isSourceMode]); 
-
-  // --- UPDATED: GENERIC CHANGE HANDLER (Fixes Title/Category Bug) ---
+  
+  // --- END OF CORE RENDERING ---
+  
+  // Gold Standard: Centralized data change and autosave management
   const handleDataChange = (updates: { title?: string, category?: string, content?: string }) => {
-      // 1. Update Local State
+      const prevContent = currentContent;
+      
       if (updates.title !== undefined) setTitle(updates.title);
       if (updates.category !== undefined) setCategory(updates.category);
       if (updates.content !== undefined) setCurrentContent(updates.content);
 
-      // 2. Flag as Dirty (Enables Save Button)
       setIsDirty(true);
 
-      // 3. Push to History
-      pushToHistory(
-          updates.content ?? currentContent, 
-          updates.title ?? title, 
-          updates.category ?? category
-      );
+      // 1. History Snapshot Logic
+      if (updates.content !== undefined && updates.content !== prevContent) {
+          pushToHistory(updates.content, updates.title ?? title, updates.category ?? category);
+      } else if (updates.title !== undefined || updates.category !== undefined) {
+           pushToHistory(currentContent, updates.title ?? title, updates.category ?? category);
+      }
 
-      // 4. Notify Parent (Debounced)
+      // 2. Parent Update (Debounced)
       if (isInternalUpdate.current) clearTimeout(isInternalUpdate.current);
       // @ts-ignore
       isInternalUpdate.current = setTimeout(() => {
           onChange(updates);
+          
+          // 3. Gold Standard Autosave: Save to Disk (only if enabled)
+          if (settings.autoSave) {
+              debouncedSaveToDisk(handleManualSave); // Use debounced function for disk writes
+          }
+
       }, 500);
   };
 
@@ -174,6 +261,7 @@ export const Editor: React.FC<EditorProps> = ({
       historyTimeoutRef.current = setTimeout(() => {
           setHistory(prev => {
               const current = prev[historyIndex];
+              // Only push if significantly changed
               if (current && current.content === newContent && current.title === newTitle && current.category === newCat) {
                   return prev;
               }
@@ -188,9 +276,10 @@ export const Editor: React.FC<EditorProps> = ({
               return newHistory;
           });
           setHistoryIndex(prev => Math.min(prev + 1, 49));
-      }, 1000);
+      }, 500); // Reduced history debounce to 500ms for responsiveness
   }, [historyIndex]);
 
+  // ... (handleUndo, handleRedo, restoreState remain the same) ...
   const handleUndo = () => {
       if (historyIndex > 0) {
           const newIndex = historyIndex - 1;
@@ -223,8 +312,8 @@ export const Editor: React.FC<EditorProps> = ({
     if (contentEditableRef.current) {
       const html = contentEditableRef.current.innerHTML;
       const md = turndownService.turndown(html);
-      // Use the new generic handler
-      handleDataChange({ content: md });
+      // OPTIMIZATION: Call the generic handler for content updates
+      handleDataChange({ content: md }); 
     }
   };
 
@@ -253,12 +342,15 @@ export const Editor: React.FC<EditorProps> = ({
   }, [historyIndex, history]);
 
   useEffect(() => {
+    // We rely on handleDataChange's debouncedSaveToDisk now, 
+    // but keep this simple interval running if needed or if debouncedSaveToDisk isn't triggered frequently enough.
     if (!settings.autoSave) return;
     const timer = setInterval(() => {
-      if (isDirty) handleManualSave();
+        if (isDirty) handleManualSave();
     }, settings.saveInterval);
     return () => clearInterval(timer);
   }, [settings.autoSave, settings.saveInterval, isDirty, currentContent, title, category]);
+
 
   const handleManualSave = () => {
     let contentToSave = currentContent;
@@ -272,40 +364,46 @@ export const Editor: React.FC<EditorProps> = ({
   };
 
   const toggleMode = () => {
-      if (isSourceMode) {
-          setIsSourceMode(false);
-      } else {
-          if (contentEditableRef.current) {
-              const html = contentEditableRef.current.innerHTML;
+      // If switching modes, ensure we are not in read mode (we are entering editing mode)
+      setIsSourceMode(prev => {
+          if (!prev) {
+              // Switching TO Source Mode
+              const html = contentEditableRef.current?.innerHTML || '';
               const md = turndownService.turndown(html);
               setCurrentContent(md);
           }
-          setIsSourceMode(true);
-      }
+          return !prev;
+      });
   };
+  
+  // Read mode toggle is now removed
 
   const execCmd = (command: string, value: string | undefined = undefined) => {
     if (contentEditableRef.current) contentEditableRef.current.focus();
     document.execCommand(command, false, value);
     
-    if (command === 'formatBlock' && (value === '<pre>' || value === '<blockquote>')) {
+    // FEATURE RESTORATION FIX: Restore block break-out logic and set caret inside
+    if (command === 'formatBlock' && (value === 'pre' || value === 'blockquote' || value === '<pre>' || value === '<blockquote>')) {
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
             let node = selection.anchorNode as Node | null;
+            
+            // Traverse up to find the block element
             while (node && node.nodeName !== 'PRE' && node.nodeName !== 'BLOCKQUOTE' && node !== contentEditableRef.current) {
                 node = node.parentNode;
             }
 
             if (node && (node.nodeName === 'PRE' || node.nodeName === 'BLOCKQUOTE')) {
                 const blockNode = node as HTMLElement;
-                const p = document.createElement('p');
-                p.innerHTML = '<br>';
                 
-                if (blockNode.nextSibling) {
-                    blockNode.parentNode?.insertBefore(p, blockNode.nextSibling);
-                } else {
-                    blockNode.parentNode?.appendChild(p);
-                }
+                const range = document.createRange();
+                const sel = window.getSelection();
+                
+                // Place cursor at the start of the block's content
+                range.setStart(blockNode.firstChild || blockNode, 0); 
+                range.collapse(true);
+                sel?.removeAllRanges();
+                sel?.addRange(range);
             }
         }
     }
@@ -321,7 +419,7 @@ export const Editor: React.FC<EditorProps> = ({
         node = node.parentNode;
     }
     if (node && node.nodeName === 'UL') {
-        const ul = node as HTMLUListElement;
+        const ul = node as HTMLUlistElement;
         Array.from(ul.querySelectorAll('li')).forEach(li => {
             if (!li.querySelector('input[type="checkbox"]')) {
                 li.style.listStyle = 'none';
@@ -384,35 +482,43 @@ export const Editor: React.FC<EditorProps> = ({
 
   const handleEditorClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
+    
+    // Checkbox interaction logic (works in both modes)
     if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
         const checkbox = target as HTMLInputElement;
         const li = checkbox.closest('li');
         const span = li?.querySelector('span');
+        
+        isCheckboxClick.current = true; 
 
         if (checkbox.checked) checkbox.setAttribute('checked', 'checked');
         else checkbox.removeAttribute('checked');
 
-        setTimeout(() => {
-            if (checkbox.checked) {
-                if (span) {
-                    span.style.textDecoration = 'line-through';
-                    span.style.opacity = '0.6';
-                    span.style.color = '#6b7280';
-                }
-            } else {
-                if (span) {
-                    span.style.textDecoration = 'none';
-                    span.style.opacity = '1';
-                    span.style.color = '';
-                }
+        // OPTIMIZATION FIX: Run logic synchronously for instant feel
+        if (checkbox.checked) {
+            if (span) {
+                span.style.textDecoration = 'line-through';
+                span.style.opacity = '0.6';
+                span.style.color = '#6b7280';
             }
-            handleVisualInput();
-        }, 50);
+        } else {
+            if (span) {
+                span.style.textDecoration = 'none';
+                span.style.opacity = '1';
+                span.style.color = '';
+            }
+        }
+        handleVisualInput();
+        isCheckboxClick.current = false; 
     }
+    
+    // Since there is no dedicated Read Mode feature now, all clicks are handled by the browser/handlers above.
   };
 
   const handleEditorKeyDown = (e: React.KeyboardEvent) => {
+    // Standard keyboard logic only applies in Edit/Source mode
     if (isSourceMode) return;
+    
     const breakOutOfBlock = (nodeName: string) => {
         const selection = window.getSelection();
         if (!selection || !selection.rangeCount) return false;
@@ -440,6 +546,7 @@ export const Editor: React.FC<EditorProps> = ({
             return;
         }
     }
+    // ... (rest of Enter and Backspace logic remains the same) ...
     if (e.key === 'Backspace') {
         const selection = window.getSelection();
         if (selection && selection.isCollapsed) {
@@ -528,6 +635,12 @@ export const Editor: React.FC<EditorProps> = ({
   };
 
   const handleEditorFocus = () => {
+      // Since Read Mode is removed, this simplifies greatly.
+      if (isCheckboxClick.current) {
+          isCheckboxClick.current = false;
+          return;
+      }
+      
       const text = contentEditableRef.current?.innerText || '';
       if (text.includes('New Note') && text.includes('Start writing here')) {
           if (contentEditableRef.current) {
@@ -546,10 +659,11 @@ export const Editor: React.FC<EditorProps> = ({
       }
   };
 
-  const ToolbarBtn = ({ icon: Icon, label, onClick, active = false }: any) => (
+  const ToolbarBtn = ({ icon: Icon, label, onClick, active = false, disabled }: any) => (
     <button
       onClick={(e) => { e.preventDefault(); onClick(); }}
-      className={`p-2 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+      disabled={disabled}
+      className={`p-2 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-30 ${
         active 
         ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' 
         : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -564,15 +678,16 @@ export const Editor: React.FC<EditorProps> = ({
     <div className="h-full flex flex-col bg-white dark:bg-gray-900">
       <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
       
+      {/* HEADER */}
       <div className="flex flex-col gap-4 p-4 border-b border-gray-200 dark:border-gray-800">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            {/* UPDATED: Title Input using new Handler */}
+            {/* Darker placeholder text (Placeholder contrast fix) */}
             <input
                 type="text"
                 value={title}
                 onChange={(e) => handleDataChange({ title: e.target.value })}
                 onFocus={handleTitleFocus}
-                className="text-2xl font-bold bg-transparent border-none focus:ring-0 placeholder-gray-400 text-gray-900 dark:text-white flex-1 min-w-0"
+                className="text-2xl font-bold bg-transparent border-none focus:ring-0 placeholder-gray-600 dark:placeholder-gray-400 text-gray-900 dark:text-white flex-1 min-w-0"
                 placeholder="Untitled Note"
             />
             
@@ -604,14 +719,14 @@ export const Editor: React.FC<EditorProps> = ({
                             onDelete();
                         }
                     }}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
                 >
                     <Trash2 size={16} />
                 </button>
 
                 <button
                     onClick={handleManualSave}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${isDirty ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600'}`}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${isDirty ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600'} disabled:opacity-50`}
                 >
                     {isDirty ? <Save size={16} /> : <Check size={16} />}
                     <span className="hidden sm:inline">{isDirty ? 'Save' : 'Saved'}</span>
@@ -619,7 +734,7 @@ export const Editor: React.FC<EditorProps> = ({
 
                 <button
                     onClick={toggleMode}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium disabled:opacity-50"
                 >
                     {isSourceMode ? <Eye size={16} /> : <FileCode size={16} />}
                     <span className="hidden sm:inline">{isSourceMode ? 'Preview' : 'Markdown'}</span>
@@ -627,10 +742,10 @@ export const Editor: React.FC<EditorProps> = ({
             </div>
         </div>
         
+        {/* Removed Read/Edit Mode Toggle from the main header area */}
         <div className="flex items-center gap-2">
             <div className="relative group flex items-center">
                 <Tag size={16} className="absolute left-2 text-gray-400" />
-                {/* UPDATED: Category Input using new Handler */}
                 <input 
                     type="text" 
                     list="categories" 
@@ -646,8 +761,10 @@ export const Editor: React.FC<EditorProps> = ({
         </div>
       </div>
 
+      {/* TOOLBAR */}
       {!isSourceMode && (
         <div className="flex flex-wrap items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 overflow-x-auto">
+          {/* Controls are always active now */}
           <ToolbarBtn icon={Bold} label="Bold" onClick={() => execCmd('bold')} />
           <ToolbarBtn icon={Italic} label="Italic" onClick={() => execCmd('italic')} />
           <ToolbarBtn icon={Underline} label="Underline" onClick={() => execCmd('underline')} />
@@ -660,8 +777,8 @@ export const Editor: React.FC<EditorProps> = ({
           <ToolbarBtn icon={ListOrdered} label="Numbered List" onClick={() => execCmd('insertOrderedList')} />
           <ToolbarBtn icon={CheckSquare} label="Checklist" onClick={insertChecklist} />
           <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
-          <ToolbarBtn icon={Quote} label="Blockquote" onClick={() => execCmd('formatBlock', '<blockquote>')} />
-          <ToolbarBtn icon={Code} label="Code Block" onClick={() => execCmd('formatBlock', '<pre>')} />
+          <ToolbarBtn icon={Quote} label="Blockquote" onClick={() => execCmd('formatBlock', 'blockquote')} />
+          <ToolbarBtn icon={Code} label="Code Block" onClick={() => execCmd('formatBlock', 'pre')} />
           <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
           <ToolbarBtn icon={LinkIcon} label="Link" onClick={() => {
               const url = prompt('Enter URL:');
@@ -675,6 +792,7 @@ export const Editor: React.FC<EditorProps> = ({
         </div>
       )}
 
+      {/* EDITOR AREA */}
       <div className="flex-1 overflow-hidden relative">
         {isSourceMode ? (
             <textarea
@@ -688,13 +806,11 @@ export const Editor: React.FC<EditorProps> = ({
         ) : (
             <div 
               className="h-full overflow-y-auto p-8 bg-white dark:bg-gray-900 cursor-text" 
-              onClick={(e) => {
-                  if (e.target === e.currentTarget && contentEditableRef.current) contentEditableRef.current.focus();
-              }}
             >
                 <div
                     ref={contentEditableRef}
-                    contentEditable
+                    // CRITICAL FIX: Always editable when not in source mode
+                    contentEditable={true} 
                     onInput={handleVisualInput}
                     onClick={handleEditorClick}
                     onKeyDown={handleEditorKeyDown}
@@ -703,7 +819,9 @@ export const Editor: React.FC<EditorProps> = ({
                         prose prose-slate dark:prose-invert max-w-none focus:outline-none min-h-[50vh] 
                         prose-p:my-2 prose-headings:my-4 prose-img:rounded-lg prose-img:shadow-md
                         prose-img:max-h-[400px] prose-img:w-auto prose-img:max-w-full prose-img:object-contain
-                        ${isDefaultContent ? 'text-slate-500 dark:text-slate-400 opacity-80' : ''}
+                        /* FIX: Darker placeholder text contrast */
+                        ${isDefaultContent ? 'text-slate-700 dark:text-slate-300 opacity-90' : ''}
+                        cursor-text
                     `}
                 />
             </div>

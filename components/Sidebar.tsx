@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Note, ViewMode } from '../types'; // Import ViewMode
-import { Plus, Search, Trash2, X, Download, Settings, ChevronDown, ChevronRight, CornerUpLeft, Github } from 'lucide-react'; // Import Github icon
+import { Plus, Search, Trash2, X, Download, Settings, ChevronDown, ChevronRight, CornerUpLeft, Github, List } from 'lucide-react'; // Added List icon
 
 interface SidebarProps {
   notes: Note[];
@@ -12,7 +12,7 @@ interface SidebarProps {
   onEmptyTrash: () => void;           
   isOpen: boolean;
   onCloseMobile: () => void;
-  onExport: () => void;
+  onExport: () => void; // Keeping here as it's passed down from App.tsx
   onOpenSettings: () => void;
   viewMode: ViewMode;                 
   onViewModeChange: (mode: ViewMode) => void; 
@@ -28,7 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onEmptyTrash,  
   isOpen,
   onCloseMobile,
-  onExport,
+  onExport, // Retaining prop to pass to SettingsModal
   onOpenSettings,
   viewMode, 
   onViewModeChange 
@@ -77,7 +77,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
           }`}
       >
-          <Icon size={16} />
+          {/* FIX: Use List icon for Notes Tab */}
+          <Icon size={16} /> 
           {label}
           {count !== undefined && count > 0 && (
               <span className={`text-xs px-2 py-0.5 rounded-full ${viewMode === mode ? 'bg-white text-blue-600' : 'bg-gray-300 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}>
@@ -109,7 +110,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         
         {/* VIEW MODE TABS */}
         <div className="flex gap-2">
-            <TabButton mode="all" icon={Plus} label="Notes" />
+            {/* FIX: Use List icon for Notes tab to show it's a view filter, not a creation button */}
+            <TabButton mode="all" icon={List} label="Notes" /> 
             <TabButton mode="trash" icon={Trash2} label="Trash" count={trashCount} />
         </div>
 
@@ -238,11 +240,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className="flex items-center gap-1 hover:text-blue-700 dark:hover:text-blue-400 transition-colors focus:outline-none focus:underline" 
                 title="View on GitHub"
              >
-               <Github size={14} />
+               <Github size={14} /> GitHub
              </a>
-             <button onClick={onExport} className="flex items-center gap-1 hover:text-blue-700 dark:hover:text-blue-400 transition-colors focus:outline-none focus:underline" title="Download JSON Backup">
-               <Download size={14} /> Backup
-             </button>
+             {/* REMOVED BACKUP BUTTON: Moved to SettingsModal */}
              <button onClick={onOpenSettings} className="flex items-center gap-1 hover:text-blue-700 dark:hover:text-blue-400 transition-colors focus:outline-none focus:underline" title="Settings">
                <Settings size={14} />
              </button>
