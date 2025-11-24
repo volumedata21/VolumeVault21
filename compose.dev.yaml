@@ -1,7 +1,6 @@
 services:
   app:
     build: .
-    # ADD THIS LINE BELOW:
     command: ["npm", "run", "dev"]
     ports:
       - "2100:2100" # Vite Dev Server (Frontend)
@@ -12,4 +11,5 @@ services:
       - ./data:/data
     environment:
       - VITE_API_KEY=${API_KEY}
+      - NODE_ENV=development
     restart: unless-stopped

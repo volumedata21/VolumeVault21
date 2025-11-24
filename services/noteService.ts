@@ -3,6 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 // @ts-ignore
 import { get, set, values, del, setMany } from 'idb-keyval';
 
+// Initialize a Broadcast Channel for cross-tab communication
+const SYNC_CHANNEL = new BroadcastChannel('volumevault-sync');
+
 export const noteService = {
   // 1. READ: Filter out deleted notes so they don't show in the UI
   getAllNotes: async (): Promise<Note[]> => {
@@ -13,7 +16,7 @@ export const noteService = {
       noteService.sync().catch(console.error);
       
       return (notes as Note[])
-        .filter(n => !n.isDeleted) // <--- HIDES DELETED NOTES
+        .filter(n => !n.isDeleted) 
         .sort((a, b) => b.updatedAt - a.updatedAt);
     } catch (e) {
       console.error("Failed to load notes", e);
@@ -31,6 +34,9 @@ export const noteService = {
     
     // Save to Local DB
     await set(note.id, updatedNote);
+
+    // FIX: Send a local update signal right after saving locally
+    SYNC_CHANNEL.postMessage({ type: 'LOCAL_UPDATE', id: note.id });
 
     // Attempt Cloud Sync
     noteService.pushNoteToServer(updatedNote).catch(() => {
@@ -61,9 +67,8 @@ export const noteService = {
   deleteNote: async (id: string): Promise<void> => {
     const note = await get(id);
     if (note) {
-        // We DO NOT use del(id). We update it to be deleted.
-        // This ensures the deletion syncs to other devices.
         await noteService.saveNote({ ...note, isDeleted: true });
+        SYNC_CHANNEL.postMessage({ type: 'NOTE_DELETED', id: note.id });
     }
   },
 
@@ -77,6 +82,8 @@ export const noteService = {
       if (res.ok) {
           // Mark as synced locally
           await set(note.id, { ...note, synced: true });
+          // If successful, tell all tabs to check for updates
+          SYNC_CHANNEL.postMessage({ type: 'SYNC_SUCCESS' }); 
       }
   },
 
@@ -93,14 +100,33 @@ export const noteService = {
 
           // B. Pull Server Changes
           const res = await fetch('/api/notes');
-          if (res.ok) {
-              const serverNotes: Note[] = await res.json();
-              for (const sNote of serverNotes) {
-                  const localNote = allLocal.find(l => l.id === sNote.id);
-                  if (!localNote || sNote.updatedAt > localNote.updatedAt) {
-                      await set(sNote.id, { ...sNote, synced: true });
-                  }
+          if (!res.ok) return;
+          const serverNotes: Note[] = await res.json();
+          
+          let updated = false;
+          let notesToUpdate = [];
+
+          // C. MERGE
+          const allLocalMap = new Map(allLocal.map(n => [n.id, n]));
+
+          for (const sNote of serverNotes) {
+              const localNote = allLocalMap.get(sNote.id);
+              // Only pull if server version is newer or the note is new locally
+              if (!localNote || sNote.updatedAt > localNote.updatedAt) {
+                  notesToUpdate.push([sNote.id, { ...sNote, synced: true }]);
+                  updated = true;
               }
+          }
+          
+          if (notesToUpdate.length > 0) {
+              // Atomically update all pulled notes
+              await setMany(notesToUpdate);
+              console.log(`Pulled ${notesToUpdate.length} updates from server.`);
+          }
+          
+          if (updated) {
+              // If we pulled anything new, tell all tabs to refresh their UI
+              SYNC_CHANNEL.postMessage({ type: 'PULL_SUCCESS' }); 
           }
       } catch (e) {
           console.error("Sync failed", e);

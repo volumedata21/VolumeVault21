@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppSettings } from '../types';
-import { X, Save, Clock, Server, Key, RefreshCw } from 'lucide-react';
+import { X, Save, Clock, Server, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
 import { noteService } from '../services/noteService';
 
 interface SettingsModalProps {
@@ -17,23 +17,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
 }) => {
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<string>('');
+  // syncStatus holds the confirmation message: "Sync complete!", "Sync failed."
+  const [syncStatus, setSyncStatus] = useState<string>(''); 
 
   if (!isOpen) return null;
 
   const handleSync = async () => {
-    if (!settings.serverUrl) return;
     setIsSyncing(true);
     setSyncStatus('Syncing...');
+    
+    // We use the new, integrated sync function from noteService
     try {
-        await noteService.syncNotes(settings.serverUrl, settings.serverApiKey);
-        setSyncStatus('Sync complete!');
-        setTimeout(() => setSyncStatus(''), 3000);
+        await noteService.sync();
+        setSyncStatus('Sync complete! Changes pulled from server.');
+        setTimeout(() => setSyncStatus(''), 5000);
     } catch (e) {
-        setSyncStatus('Sync failed.');
+        setSyncStatus('Sync failed. Check your network connection.');
+        setTimeout(() => setSyncStatus(''), 5000);
     } finally {
         setIsSyncing(false);
     }
+  };
+  
+  const StatusMessage = () => {
+      if (!syncStatus) return null;
+      
+      const isSuccess = syncStatus.includes('complete');
+      const Icon = isSuccess ? CheckCircle : XCircle;
+      const colorClass = isSuccess ? 'text-green-500' : 'text-red-500';
+
+      return (
+          <p className={`flex items-center gap-2 text-sm text-right ${colorClass} font-medium mt-2`}>
+              <Icon size={16} />
+              {syncStatus}
+          </p>
+      );
   };
 
   return (
@@ -52,8 +70,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
         
         <div className="p-6 space-y-8 overflow-y-auto">
-          {/* Persistence Section */}
+          {/* Sync Section (Updated) */}
           <div className="space-y-4">
+            <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
+              <Server size={16} /> Sync & Backup
+            </h3>
+            
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+                Manually trigger synchronization with your server backend. This pushes local changes and pulls updates from other devices.
+            </p>
+
+            <div className="flex justify-end pt-2">
+                <button 
+                    onClick={handleSync}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 transition-all"
+                >
+                    <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
+                    {isSyncing ? "Syncing..." : "Manual Sync Now"}
+                </button>
+            </div>
+            <div className="text-right">
+                <StatusMessage />
+            </div>
+          </div>
+          
+          {/* Persistence Section */}
+          <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
             <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               Saving & Persistence
             </h3>
@@ -100,74 +143,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
           </div>
-
-          {/* Sync Section */}
-          <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              Sync (MySQL Backend)
-            </h3>
-
-            <div className="space-y-3">
-                <div className="flex items-start gap-4">
-                    <div className="pt-2">
-                         <div className="p-2 bg-green-100 dark:bg-green-900/50 rounded-lg text-green-700 dark:text-green-300">
-                            <Server size={20} />
-                         </div>
-                    </div>
-                    <div className="flex-1">
-                        <label className="block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
-                            Server URL
-                        </label>
-                        <input 
-                            type="text" 
-                            placeholder="https://api.myserver.com"
-                            value={settings.serverUrl || ''}
-                            onChange={(e) => onUpdateSettings({ ...settings, serverUrl: e.target.value })}
-                            className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-600"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">URL of your backend API.</p>
-                    </div>
-                </div>
-
-                <div className="flex items-start gap-4">
-                    <div className="pt-2">
-                        <div className="p-2 bg-amber-100 dark:bg-amber-900/50 rounded-lg text-amber-700 dark:text-amber-300">
-                            <Key size={20} />
-                        </div>
-                    </div>
-                    <div className="flex-1">
-                        <label className="block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
-                            API Key (Optional)
-                        </label>
-                        <input 
-                            type="password" 
-                            placeholder="Secret Key"
-                            value={settings.serverApiKey || ''}
-                            onChange={(e) => onUpdateSettings({ ...settings, serverApiKey: e.target.value })}
-                            className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-600"
-                        />
-                    </div>
-                </div>
-
-                {settings.serverUrl && (
-                    <div className="flex justify-end pt-2">
-                        <button 
-                            onClick={handleSync}
-                            disabled={isSyncing}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50"
-                        >
-                            <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
-                            {isSyncing ? "Syncing..." : "Sync Now"}
-                        </button>
-                    </div>
-                )}
-                {syncStatus && (
-                    <p className={`text-sm text-right ${syncStatus.includes('failed') ? 'text-red-500' : 'text-green-500'}`}>
-                        {syncStatus}
-                    </p>
-                )}
-            </div>
-          </div>
+          
+          {/* Old Sync Settings (Removed Server URL/API Key inputs as they are not used in your current architecture) */}
+          
         </div>
 
         <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex justify-end flex-shrink-0">
