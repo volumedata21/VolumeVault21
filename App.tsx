@@ -19,37 +19,66 @@ export default function App() {
     const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    
+    // Load Settings
     const [settings, setSettings] = useState<AppSettings>(() => {
         try {
-            // Try new key
             let saved = localStorage.getItem(SETTINGS_KEY);
-            // Fallback to old key
             if (!saved) {
                 saved = localStorage.getItem(LEGACY_SETTINGS_KEY);
                 if (saved) {
                     try {
                         localStorage.setItem(SETTINGS_KEY, saved);
-                    } catch (e) { /* Ignore quota errors during initial migration */ }
+                    } catch (e) { /* Ignore quota errors */ }
                 }
             }
             return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
         } catch (e) {
-            console.warn("Failed to load settings from LocalStorage", e);
+            console.warn("Failed to load settings", e);
             return DEFAULT_SETTINGS;
         }
     });
 
-    // Load notes on mount (Async)
+    // -------------------------------------------------------------------------
+    //  CORRECTED LOAD & SYNC LOGIC
+    // -------------------------------------------------------------------------
     useEffect(() => {
-        const loadNotes = async () => {
+        // Function to fetch notes from IDB and update state
+        const refreshNotes = async (isInitialLoad = false) => {
             const loadedNotes = await noteService.getAllNotes();
             setNotes(loadedNotes);
-            if (loadedNotes.length > 0 && !currentNoteId) {
-                setCurrentNoteId(loadedNotes[0].id);
+            
+            // Only auto-select the first note on the very first load
+            // We use the functional update 'prev' to check if a note is already selected
+            if (isInitialLoad && loadedNotes.length > 0) {
+                setCurrentNoteId(prev => prev || loadedNotes[0].id);
             }
         };
-        loadNotes();
+
+        // 1. Initial Load
+        refreshNotes(true);
+
+        // 2. Event Handlers for Background Sync
+        const handleOnline = () => {
+            console.log("Network restored. Syncing...");
+            noteService.sync().then(() => refreshNotes(false));
+        };
+
+        const handleFocus = () => {
+            noteService.sync().then(() => refreshNotes(false));
+        };
+
+        // 3. Listeners
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('focus', handleFocus);
+
+        // 4. Cleanup
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('focus', handleFocus);
+        };
     }, []);
+    // -------------------------------------------------------------------------
 
     // Compute available categories from all notes
     const availableCategories = useMemo(() => {
@@ -62,15 +91,13 @@ export default function App() {
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(newSettings));
         } catch (e) {
-            console.error("Failed to save settings to LocalStorage (Quota Exceeded)", e);
-            // UI still updates via state, so we don't block the user.
+            console.error("Failed to save settings", e);
         }
     };
 
     const getCurrentNote = () => notes.find(n => n.id === currentNoteId);
 
     const handleCreateNote = async () => {
-        // Safety save current note before switching/creating
         if (currentNoteId) await saveNoteToDisk(currentNoteId);
 
         const newNote = await noteService.createNote();
@@ -80,9 +107,7 @@ export default function App() {
     };
 
     const handleNoteSelect = async (id: string) => {
-        // Safety save current note before switching
         if (currentNoteId) await saveNoteToDisk(currentNoteId);
-
         setCurrentNoteId(id);
         setIsSidebarOpen(false);
     };
@@ -104,19 +129,14 @@ export default function App() {
 
         setNotes(prev => prev.map(note => {
             if (note.id === currentNoteId) {
-                // We update the 'updatedAt' timestamp in memory to reflect activity
                 return { ...note, ...updates, updatedAt: Date.now() };
             }
             return note;
         }));
     };
 
-    // Persists to Disk (Async, for AutoSave/Manual Save)
+    // Persists to Disk (Async)
     const saveNoteToDisk = async (id: string) => {
-        // Note: We use the functional update pattern's result or current state.
-        // However, since this is async and decoupled from the immediate event loop of setNotes,
-        // we rely on the state being reasonably up to date.
-        // Ideally, for manual save, we should pass the content directly, but this works for 99% cases.
         const noteToSave = notes.find(n => n.id === id);
         if (noteToSave) {
             await noteService.saveNote(noteToSave);
@@ -126,8 +146,6 @@ export default function App() {
 
     const handleManualSaveCurrent = () => {
         if (currentNoteId) {
-            // Small timeout to allow state to settle if needed, though usually React batches this well enough
-            // for the subsequent async call.
             saveNoteToDisk(currentNoteId);
         }
     };

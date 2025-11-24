@@ -6,13 +6,14 @@ export interface Note {
   createdAt: number;
   updatedAt: number;
   tags: string[];
+  synced?: boolean; // <--- ADD THIS
 }
 
 export type ViewMode = 'edit' | 'preview' | 'split';
 
 export interface AppSettings {
   autoSave: boolean;
-  saveInterval: number; // in milliseconds
+  saveInterval: number;
   serverUrl?: string;
   serverApiKey?: string;
 }

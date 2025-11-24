@@ -4,6 +4,7 @@
   "content": "*   [ ]  pollo\n*   [x]  arroz\n*   [x]  guineos\n*   [x]  gandules",
   "category": "General",
   "createdAt": 1763954075444,
-  "updatedAt": 1763954798387,
-  "tags": []
+  "updatedAt": 1763955789314,
+  "tags": [],
+  "synced": false
 }
