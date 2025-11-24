@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Note, ViewMode } from '../types'; // Import ViewMode
-import { Plus, Search, Trash2, X, Download, Settings, ChevronDown, ChevronRight, CornerUpLeft } from 'lucide-react';
+import { Plus, Search, Trash2, X, Download, Settings, ChevronDown, ChevronRight, CornerUpLeft, Github } from 'lucide-react'; // Import Github icon
 
 interface SidebarProps {
   notes: Note[];
@@ -8,14 +8,14 @@ interface SidebarProps {
   onSelectNote: (id: string) => void;
   onCreateNote: () => void;
   onDeleteNote: (id: string) => void;
-  onRestoreNote: (id: string) => void; // <--- ADDED PROP
-  onEmptyTrash: () => void;           // <--- ADDED PROP
+  onRestoreNote: (id: string) => void; 
+  onEmptyTrash: () => void;           
   isOpen: boolean;
   onCloseMobile: () => void;
   onExport: () => void;
   onOpenSettings: () => void;
-  viewMode: ViewMode;                 // <--- ADDED PROP
-  onViewModeChange: (mode: ViewMode) => void; // <--- ADDED PROP
+  viewMode: ViewMode;                 
+  onViewModeChange: (mode: ViewMode) => void; 
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -24,21 +24,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectNote,
   onCreateNote,
   onDeleteNote,
-  onRestoreNote, // <--- Destructure
-  onEmptyTrash,  // <--- Destructure
+  onRestoreNote, 
+  onEmptyTrash,  
   isOpen,
   onCloseMobile,
   onExport,
   onOpenSettings,
-  viewMode, // <--- Destructure
-  onViewModeChange // <--- Destructure
+  viewMode, 
+  onViewModeChange 
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
 
   // Filter based on the current view mode
   const displayedNotes = notes
-    .filter(note => viewMode === 'trash' ? note.isDeleted : !note.isDeleted) // <--- MAIN FILTER
+    .filter(note => viewMode === 'trash' ? note.isDeleted : !note.isDeleted) 
     .filter((note) => 
       note.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
       note.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -230,6 +230,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex justify-between items-center text-xs text-gray-600 dark:text-gray-400 font-medium">
            <span>{notes.length - trashCount} notes</span>
            <div className="flex items-center gap-3">
+             {/* GITHUB LINK */}
+             <a 
+                href="https://github.com/volumedata21/VolumeVault21" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 hover:text-blue-700 dark:hover:text-blue-400 transition-colors focus:outline-none focus:underline" 
+                title="View on GitHub"
+             >
+               <Github size={14} />
+             </a>
              <button onClick={onExport} className="flex items-center gap-1 hover:text-blue-700 dark:hover:text-blue-400 transition-colors focus:outline-none focus:underline" title="Download JSON Backup">
                <Download size={14} /> Backup
              </button>
