@@ -6,7 +6,8 @@ export interface Note {
   createdAt: number;
   updatedAt: number;
   tags: string[];
-  synced?: boolean; // <--- ADD THIS
+  synced?: boolean;
+  isDeleted?: boolean;
 }
 
 export type ViewMode = 'edit' | 'preview' | 'split';

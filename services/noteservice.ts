@@ -4,40 +4,43 @@ import { v4 as uuidv4 } from 'uuid';
 import { get, set, values, del, setMany } from 'idb-keyval';
 
 export const noteService = {
-  // 1. READ: Always read from Local DB (Fast & Offline-ready)
+  // 1. READ: Filter out deleted notes so they don't show in the UI
   getAllNotes: async (): Promise<Note[]> => {
     try {
       const notes = (await values()) || [];
-      // Trigger a sync in the background without blocking the UI
+      
+      // Background Sync (don't await)
       noteService.sync().catch(console.error);
-      return (notes as Note[]).sort((a, b) => b.updatedAt - a.updatedAt);
+      
+      return (notes as Note[])
+        .filter(n => !n.isDeleted) // <--- HIDES DELETED NOTES
+        .sort((a, b) => b.updatedAt - a.updatedAt);
     } catch (e) {
-      console.error("Failed to load local notes", e);
+      console.error("Failed to load notes", e);
       return [];
     }
   },
 
-  // 2. WRITE: Save to Local DB immediately, then try to Sync
+  // 2. WRITE
   saveNote: async (note: Note): Promise<Note> => {
     const updatedNote = { 
         ...note, 
         updatedAt: Date.now(),
-        synced: false // Mark as "dirty" so we know it needs uploading
+        synced: false 
     };
     
-    // Save locally first (guarantees offline support)
+    // Save to Local DB
     await set(note.id, updatedNote);
 
-    // Try to sync immediately (fire and forget)
-    // If we are offline, this will fail silently, which is fine.
-    // The next time the app loads or goes online, it will retry.
+    // Attempt Cloud Sync
     noteService.pushNoteToServer(updatedNote).catch(() => {
-        console.log("Offline: Note saved locally, will sync later.");
+        console.log("Offline: Change saved locally.");
     });
 
     return updatedNote;
   },
 
+  // 3. CREATE
   createNote: async (): Promise<Note> => {
     const newNote: Note = {
       id: uuidv4(),
@@ -47,21 +50,24 @@ export const noteService = {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tags: [],
-      synced: false
+      synced: false,
+      isDeleted: false
     };
-    await set(newNote.id, newNote);
+    await noteService.saveNote(newNote);
     return newNote;
   },
 
+  // 4. DELETE (Soft Delete)
   deleteNote: async (id: string): Promise<void> => {
-    await del(id);
-    // Ideally, you'd add a "deleted" flag and sync that to the server too
-    // For now, this is a local-only delete
+    const note = await get(id);
+    if (note) {
+        // We DO NOT use del(id). We update it to be deleted.
+        // This ensures the deletion syncs to other devices.
+        await noteService.saveNote({ ...note, isDeleted: true });
+    }
   },
 
   // --- SYNC ENGINE ---
-
-  // Helper: Push a single note to the server
   pushNoteToServer: async (note: Note): Promise<void> => {
       const res = await fetch('/api/notes', {
           method: 'POST',
@@ -69,51 +75,35 @@ export const noteService = {
           body: JSON.stringify(note)
       });
       if (res.ok) {
-          // If successful, mark as synced locally
+          // Mark as synced locally
           await set(note.id, { ...note, synced: true });
       }
   },
 
-  // Main Sync Function: Pushes dirty notes, Pulls new server notes
   sync: async (): Promise<void> => {
-      if (!navigator.onLine) return; // Don't bother if offline
+      if (!navigator.onLine) return;
 
       try {
-          // A. PUSH: Find all local notes that aren't synced
+          // A. Push Local Changes
           const allLocal: Note[] = await values();
           const dirtyNotes = allLocal.filter(n => n.synced === false);
-          
           if (dirtyNotes.length > 0) {
-              console.log(`Pushing ${dirtyNotes.length} notes to server...`);
               await Promise.all(dirtyNotes.map(n => noteService.pushNoteToServer(n)));
           }
 
-          // B. PULL: Get all notes from server
+          // B. Pull Server Changes
           const res = await fetch('/api/notes');
-          if (!res.ok) return;
-          const serverNotes: Note[] = await res.json();
-
-          // C. MERGE: "Last Write Wins" strategy
-          // If server has a newer version, update local IDB
-          let updatesCount = 0;
-          for (const sNote of serverNotes) {
-              const localNote = allLocal.find(l => l.id === sNote.id);
-              
-              // If we don't have it, or server is newer, take server version
-              if (!localNote || sNote.updatedAt > localNote.updatedAt) {
-                  await set(sNote.id, { ...sNote, synced: true });
-                  updatesCount++;
+          if (res.ok) {
+              const serverNotes: Note[] = await res.json();
+              for (const sNote of serverNotes) {
+                  const localNote = allLocal.find(l => l.id === sNote.id);
+                  if (!localNote || sNote.updatedAt > localNote.updatedAt) {
+                      await set(sNote.id, { ...sNote, synced: true });
+                  }
               }
           }
-          
-          if (updatesCount > 0) {
-              console.log(`Pulled ${updatesCount} updates from server.`);
-              // Note: You might need to trigger a UI refresh here
-              // usually by reloading the page or using a React Context
-          }
-
       } catch (e) {
-          console.error("Sync failed:", e);
+          console.error("Sync failed", e);
       }
   }
 };
