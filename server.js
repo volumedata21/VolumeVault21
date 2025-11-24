@@ -116,8 +116,13 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, 'dist')));
     
-    // FIX: Use '/*' as the route path for Express 5 catch-all
-    app.get('/*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
+    // FINAL FIX: Use app.use() to serve index.html for any remaining route.
+    // This is the most reliable method for client-side routing in Express 5.
+    app.use((req, res) => {
+        if (!req.path.startsWith('/api')) {
+             res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+        }
+    });
 }
 
 app.listen(PORT, '0.0.0.0', () => {
