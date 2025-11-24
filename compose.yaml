@@ -3,7 +3,7 @@ name: volumevault21
 services:
   app:
     # Pulls the latest stable release from Docker Hub
-    image: volumedata21/volumeread21:latest
+    image: volumedata21/volumevault21:latest
     container_name: volumevault21
     
     # Map port 2100 on the host to 2100 in the container

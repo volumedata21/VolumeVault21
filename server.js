@@ -56,9 +56,8 @@ app.post('/api/notes', (req, res) => {
     const note = req.body;
     const filePath = path.join(NOTES_DIR, `${note.id}.json`);
     
-    // Log specific actions
     if (note.isDeleted) {
-        console.log(`[SERVER] 🗑️ Soft Deleting (Trashing) note: ${note.title || note.id}`);
+        console.log(`[SERVER] 🗑️ Soft Deleting note: ${note.title || note.id}`);
     } else {
         console.log(`[SERVER] 💾 Saving note: ${note.title || note.id}`);
     }
@@ -96,7 +95,7 @@ app.get('/api/notes', (req, res) => {
     }
 });
 
-// 4. Hard Delete (Optional, for emptying trash later)
+// 4. Hard Delete (Optional)
 app.delete('/api/notes/:id', (req, res) => {
     const id = req.params.id.replace(/[^a-z0-9-]/gi, ''); 
     const filePath = path.join(NOTES_DIR, `${id}.json`);
@@ -116,7 +115,9 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
+    
+    // FIX: Changed '*' to '(.*)' for Express 5 compatibility
+    app.get('(.*)', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
 }
 
 app.listen(PORT, '0.0.0.0', () => {
