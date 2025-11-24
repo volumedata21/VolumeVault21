@@ -4,17 +4,22 @@ WORKDIR /app
 
 COPY package.json package-lock.json* ./
 
-# Install dependencies (including express/multer)
+# Install dependencies
 RUN npm install --legacy-peer-deps
 
-# Copy source
+# Copy source code
 COPY . .
 
-# Build the React Frontend (creates /dist folder)
+# --- PRODUCTION BUILD STEP ---
+# This compiles React into static files in the /dist folder
 RUN npm run build
 
-# Expose port
+# Expose the production port
 EXPOSE 2100
 
-# Start the custom server
+# Set environment to production (Tells server.js to serve /dist)
+ENV NODE_ENV=production
+
+# Default Command: Run the Node.js backend
+# (Your compose.dev.yaml overrides this for local development)
 CMD ["node", "server.js"]
