@@ -111,7 +111,7 @@ app.delete('/api/notes/:id', (req, res) => {
     }
 });
 
-// --- SERVE FRONTEND ---
+// --- SERVE FRONTEND (Production) ---
 
 // Serve files from the uploads directory (used by the new image links)
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -120,12 +120,16 @@ if (process.env.NODE_ENV === 'production') {
     // Serve the built client files
     app.use(express.static(path.join(__dirname, 'dist')));
     
-    // FIX: Use a catch-all route to serve index.html for client-side routing
-    app.get('*', (req, res) => {
-         // Prevent API routes from being caught here and only serve index.html for GET requests
-         if (!req.path.startsWith('/api') && req.method === 'GET') {
-             res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-         }
+    // FIX: Use app.use() instead of app.get('*') to avoid PathError on some router versions.
+    // This serves index.html for all client-side routing fallback.
+    app.use((req, res) => {
+        // Only serve index.html if the request is a GET and not for an API path
+        if (req.method === 'GET' && !req.path.startsWith('/api')) {
+            res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+        } else {
+            // For unmatched API paths (POST/PUT/DELETE) return 404
+            res.status(404).end();
+        }
     });
 }
 
