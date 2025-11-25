@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { Note, AppSettings } from '../types';
 import { 
   Save, Check, Bold, Italic, Underline, Strikethrough, Heading1, Heading2, 
-  List, ListOrdered, Code, Quote, Tag,
+  List, ListOrdered, Code, Quote, Tag, AlertOctagon,
   FileCode, Eye, CheckSquare, Image as ImageIcon, Lock, X, Trash2, RotateCcw
 } from 'lucide-react';
 // @ts-ignore
@@ -10,7 +10,7 @@ import { marked } from 'marked';
 // @ts-ignore
 import TurndownService from 'turndown';
 
-// Configure Marked globally once to prevent recursion from repeated .use() calls
+// Configure Marked globally
 const renderer = new marked.Renderer();
 // @ts-ignore
 renderer.listitem = function(item: any) {
@@ -31,7 +31,6 @@ renderer.listitem = function(item: any) {
    }
 
   if (task) {
-    // Fix for double checkbox issue: Marked sometimes includes the checkbox HTML in the text
     const cleanText = text.replace(/^<input[^>]+>\s*/, '');
 
     return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
@@ -71,6 +70,7 @@ export const Editor: React.FC<EditorProps> = ({
   const [tagInput, setTagInput] = useState('');
   
   const [isDirty, setIsDirty] = useState(false);
+  // Default to 'edit' as 'preview' (Markdown mode) is now disabled/removed
   const [viewMode, setViewMode] = useState<'edit' | 'preview' | 'readOnly'>('edit');
   const [editorContent, setEditorContent] = useState('');
   
@@ -96,6 +96,18 @@ export const Editor: React.FC<EditorProps> = ({
           return '';
       }
     });
+    service.addRule('image', {
+        filter: 'img',
+        replacement: function (_content: any, node: any) {
+            const alt = node.alt || 'Image';
+            const src = node.getAttribute('src') || '';
+            
+            if (src && src.startsWith('/uploads')) {
+                return `![${alt}](${src})`;
+            }
+            return ''; 
+        }
+    });
     return service;
   }, []);
 
@@ -106,11 +118,9 @@ export const Editor: React.FC<EditorProps> = ({
     setTags(note.tags || []);
     setIsDirty(false);
 
-    // Initial render
     const html = marked.parse(note.content) as string;
     setEditorContent(viewMode === 'preview' ? note.content : html);
     
-    // Force readOnly if trashed, restore to edit if not
     if (note.deleted) {
         setViewMode('readOnly');
     } else {
@@ -131,25 +141,22 @@ export const Editor: React.FC<EditorProps> = ({
     preBlocks.forEach((pre) => {
         if (pre.parentNode && (pre.parentNode as HTMLElement).classList.contains('code-wrapper')) return;
 
-        // Wrap pre in relative container
         const wrapper = document.createElement('div');
         wrapper.className = 'code-wrapper relative group';
         pre.parentNode?.insertBefore(wrapper, pre);
         wrapper.appendChild(pre);
 
-        // Create button
         const btn = document.createElement('button');
         btn.className = 'absolute top-2 right-2 p-1.5 bg-gray-700/50 hover:bg-gray-700 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10';
         btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2-2v1"></path></svg>`;
         btn.title = 'Copy code';
         
         btn.onclick = (e) => {
-            e.stopPropagation(); // Prevent editor focus
+            e.stopPropagation(); 
             e.preventDefault();
             const code = pre.textContent || '';
             navigator.clipboard.writeText(code);
             
-            // Temporary feedback
             btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
             setTimeout(() => {
                  btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2-2v1"></path></svg>`;
@@ -168,7 +175,6 @@ export const Editor: React.FC<EditorProps> = ({
   }, [editorContent, viewMode, attachCopyButtons]);
 
   // Debounced Save for Title Only. 
-  // Category and Tags are saved immediately to support search indexing and prevent loss on switch.
   useEffect(() => {
     if (isTrashed) return;
     const timer = setTimeout(() => {
@@ -214,12 +220,15 @@ export const Editor: React.FC<EditorProps> = ({
   const handleManualSave = () => {
     if (isTrashed) return;
     let contentToSave = '';
+    
+    // NOTE: Preview mode is effectively disabled, so this code should rarely run
     if (viewMode === 'preview') {
         contentToSave = sourceTextareaRef.current?.value || '';
     } else {
         const html = contentEditableRef.current?.innerHTML || '';
         contentToSave = turndownService.turndown(html);
     }
+    
     // Force save to disk on manual save
     onChange({ title, category, tags, content: contentToSave }, true);
     onSave();
@@ -231,7 +240,7 @@ export const Editor: React.FC<EditorProps> = ({
     if (contentEditableRef.current) {
       const html = contentEditableRef.current.innerHTML;
       const md = turndownService.turndown(html);
-      onChange({ content: md });
+      onChange({ content: md }); 
       setIsDirty(true);
     }
   };
@@ -240,26 +249,39 @@ export const Editor: React.FC<EditorProps> = ({
       if (isTrashed) return;
       const val = e.target.value;
       setEditorContent(val);
-      onChange({ content: val });
       setIsDirty(true);
   };
 
   const toggleViewMode = (mode: 'edit' | 'preview' | 'readOnly') => {
-      if (isTrashed && mode === 'edit') return; // Cannot edit trashed notes
+      if (isTrashed && mode === 'edit') return; 
       
+      // PERMANENT LOCK: Block access to the unstable Markdown view
+      if (mode === 'preview') {
+          alert("Markdown Source Code view is currently disabled due to instability and potential data loss.");
+          return;
+      }
+
       if (viewMode === 'preview' && mode !== 'preview') {
-          // Exiting source mode
-          const html = marked.parse(editorContent) as string;
+          // This block should never be reached now, but handle exit safely
+          const mdToParse = sourceTextareaRef.current?.value || note.content;
+          
+          if (mdToParse !== note.content) {
+             onChange({ content: mdToParse }); 
+          }
+          
+          const html = marked.parse(mdToParse) as string;
           setEditorContent(html);
+
           if (contentEditableRef.current) {
               contentEditableRef.current.innerHTML = html;
               attachCopyButtons();
           }
       } else if (viewMode !== 'preview' && mode === 'preview') {
-          // Entering source mode
+          // This block should never be reached
           const html = contentEditableRef.current?.innerHTML || '';
           const md = turndownService.turndown(html);
-          setEditorContent(md);
+          
+          setEditorContent(md); 
       }
       setViewMode(mode);
   };
@@ -271,8 +293,7 @@ export const Editor: React.FC<EditorProps> = ({
     }
     document.execCommand(command, false, value);
     
-    // Improved logic: If creating a block element, insert a spacer below it to allow exit
-    if (command === 'formatBlock' && (value === '<pre>' || value === '<blockquote>')) {
+    if (command === 'formatBlock' && (value === '<pre>' || value === 'blockquote')) {
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
             let node = selection.anchorNode as Node | null;
@@ -302,7 +323,6 @@ export const Editor: React.FC<EditorProps> = ({
       if (contentEditableRef.current) contentEditableRef.current.focus();
 
       const uniqueId = `cl-${Date.now()}`;
-      // Match the renderer/Enter key style structure and use <br> instead of &nbsp;
       const html = `<ul style="list-style: none;">
         <li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
             <input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
@@ -336,7 +356,6 @@ export const Editor: React.FC<EditorProps> = ({
         const newTags = [...tags, cleanTag];
         setTags(newTags);
         setTagInput('');
-        // Immediate save to disk/app state for tags to ensure search works immediately
         onChange({ tags: newTags }, true);
     }
   };
@@ -345,16 +364,38 @@ export const Editor: React.FC<EditorProps> = ({
       if (isTrashed) return;
       const newTags = tags.filter(t => t !== tagToRemove);
       setTags(newTags);
-      // Immediate save
       onChange({ tags: newTags }, true);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Image upload logic 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('image', file);
+
+    try {
+        const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Image upload FAILED: HTTP Status', response.status);
+            console.error('Response body:', errorText);
+            alert('Image upload failed. Check console for details.');
+            
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+        }
+
+        const data = await response.json();
+        const imageUrl = data.url; 
+
+        const imageMarkdown = `![Image](${imageUrl})`;
+        
         if (savedSelection.current) {
             const sel = window.getSelection();
             sel?.removeAllRanges();
@@ -362,29 +403,45 @@ export const Editor: React.FC<EditorProps> = ({
         } else {
             contentEditableRef.current?.focus();
         }
-        execCmd('insertImage', base64);
-      };
-      reader.readAsDataURL(file);
+
+        contentEditableRef.current?.focus();
+        
+        document.execCommand('insertHTML', false, ' '); 
+
+        const currentMd = turndownService.turndown(contentEditableRef.current.innerHTML);
+        
+        const combinedMd = currentMd.trim() + '\n\n' + imageMarkdown; 
+        
+        onChange({ content: combinedMd });
+        
+        const newHtml = marked.parse(combinedMd) as string;
+        if (contentEditableRef.current) {
+             contentEditableRef.current.innerHTML = newHtml;
+             setIsDirty(true);
+        }
+
+    } catch (error) {
+        console.error('An unhandled critical error occurred during image upload:', error);
+        alert('Image upload failed. Check console for details.');
+    } finally {
+        if (fileInputRef.current) fileInputRef.current.value = '';
     }
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
 
   // Editor Interactivity
   const handleEditorClick = (e: React.MouseEvent) => {
-    // Checkbox toggling (works in ReadOnly too)
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
         const checkbox = target as HTMLInputElement;
         const li = checkbox.closest('li');
         const span = li?.querySelector('span');
         
-        // Prevent toggle if trashed
         if (isTrashed) {
             e.preventDefault();
             return;
         }
 
-        // Allow UI update first
         setTimeout(() => {
             if (checkbox.checked) {
                 if (span) {
@@ -399,22 +456,16 @@ export const Editor: React.FC<EditorProps> = ({
                     span.style.color = '';
                 }
             }
-            // If read-only, we need to manually update content behind the scenes
             if (viewMode === 'readOnly') {
                const html = contentEditableRef.current?.innerHTML || '';
                const md = turndownService.turndown(html);
-               // We don't use onChange here directly to avoid full re-renders that reset scroll, 
-               // but we do need to persist.
                onChange({ content: md }); 
-               // Note: This won't trigger re-render of Editor component due to how onChange is handled in parent usually,
-               // but allows saving.
             } else {
                handleVisualInput();
             }
         }, 50);
     }
     
-    // Magic Spacer logic for creating new lines after blocks
     if (viewMode === 'edit' && target === e.currentTarget) {
         const content = contentEditableRef.current;
         if (!content) return;
@@ -439,7 +490,6 @@ export const Editor: React.FC<EditorProps> = ({
   const handleEditorKeyDown = (e: React.KeyboardEvent) => {
     if (viewMode !== 'edit' || isTrashed) return;
     
-    // Keyboard Shortcuts
     if (e.metaKey || e.ctrlKey) {
         const key = e.key.toLowerCase();
         if (!e.shiftKey) {
@@ -447,12 +497,10 @@ export const Editor: React.FC<EditorProps> = ({
             if (key === 'i') { e.preventDefault(); execCmd('italic'); return; }
             if (key === 'u') { e.preventDefault(); execCmd('underline'); return; }
         } else {
-            // Strikethrough (Ctrl+Shift+X or Ctrl+Shift+S)
             if (key === 'x' || key === 's') { e.preventDefault(); execCmd('strikeThrough'); return; }
         }
     }
     
-    // "Gold Standard" Break out of Block
     const breakOutOfBlock = (nodeName: string) => {
         const selection = window.getSelection();
         if (!selection || !selection.rangeCount) return false;
@@ -484,12 +532,10 @@ export const Editor: React.FC<EditorProps> = ({
              }
         }
         
-        // Checklist Gold Standard Logic
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
             let li = range.startContainer as HTMLElement;
-            // Traverse up safely
             while (li && li.nodeName !== 'LI' && li !== contentEditableRef.current) {
                 li = li.parentNode as HTMLElement;
             }
@@ -497,16 +543,13 @@ export const Editor: React.FC<EditorProps> = ({
             if (li && li.nodeName === 'LI') {
                 const checkbox = li.querySelector('input[type="checkbox"]');
                 if (checkbox) {
-                    // It's a checklist item
                     e.preventDefault();
                     
-                    // Check content to see if empty
                     const span = li.querySelector('span');
                     const textContent = span ? span.textContent || '' : li.textContent || '';
                     const isEmpty = textContent.trim() === '';
 
                     if (isEmpty) {
-                        // Empty -> Convert to Paragraph (break out)
                         const ul = li.parentElement;
                         const p = document.createElement('p');
                         p.innerHTML = '<br>';
@@ -514,25 +557,21 @@ export const Editor: React.FC<EditorProps> = ({
                         if (ul) {
                             if (li.nextSibling) {
                                 ul.parentNode?.insertBefore(p, ul.nextSibling);
-                                // If inside a middle, we might need to split list, but for now just move out
                             } else {
                                 ul.parentNode?.insertBefore(p, ul.nextSibling);
                             }
                             li.remove();
                             if (ul.children.length === 0) ul.remove();
                         } else {
-                            // Fallback if no UL parent (rare)
                             li.replaceWith(p);
                         }
                         
-                        // Focus new paragraph
                         const newRange = document.createRange();
                         newRange.setStart(p, 0);
                         newRange.collapse(true);
                         selection.removeAllRanges();
                         selection.addRange(newRange);
                     } else {
-                        // Not empty -> New Checkbox
                         const newLi = document.createElement('li');
                         newLi.className = 'checklist-item';
                         newLi.style.cssText = 'list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;';
@@ -544,7 +583,6 @@ export const Editor: React.FC<EditorProps> = ({
                             li.parentNode?.appendChild(newLi);
                         }
                         
-                        // Focus new checkbox span
                         const newSpan = newLi.querySelector('span');
                         if (newSpan) {
                             const newRange = document.createRange();
@@ -560,7 +598,6 @@ export const Editor: React.FC<EditorProps> = ({
             }
         }
         
-        // Double Enter at end of block to break out
         if (selection && selection.isCollapsed) {
              const node = selection.anchorNode;
              if (node && (node.textContent === '' || node.textContent === '\n')) {
@@ -572,7 +609,6 @@ export const Editor: React.FC<EditorProps> = ({
         }
     }
     
-    // Handle checklist deletion logic
     if (e.key === 'Backspace') {
         const selection = window.getSelection();
         if (selection && selection.isCollapsed) {
@@ -622,7 +658,6 @@ export const Editor: React.FC<EditorProps> = ({
   const handleContentFocus = () => {
       if (!contentEditableRef.current) return;
       const text = contentEditableRef.current.innerText || '';
-      // Check loosely for the default content pattern
       if (text.includes('New Note') && text.includes('Start writing here')) {
           contentEditableRef.current.innerHTML = '<p><br></p>';
           handleVisualInput();
@@ -632,11 +667,9 @@ export const Editor: React.FC<EditorProps> = ({
   const handleContentBlur = () => {
       if (!contentEditableRef.current) return;
       const text = contentEditableRef.current.innerText?.trim();
-      // Fix: Check for images or other media so we don't clear content if only an image exists
       const hasMedia = contentEditableRef.current.querySelector('img, iframe, video, hr, table');
 
       if (!text && !hasMedia) {
-          // Double check HTML is effectively empty
           const html = contentEditableRef.current.innerHTML.trim();
           if (html === '' || html === '<br>' || html === '<p><br></p>') {
               const html = marked.parse(DEFAULT_CONTENT) as string;
@@ -653,11 +686,10 @@ export const Editor: React.FC<EditorProps> = ({
      return text.includes('New Note') && text.includes('Start writing here');
   }, [editorContent, note.content]);
   
-  // Toolbar button style - Changed to dark:text-white
   const toolbarBtnClass = "p-2 text-gray-700 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors";
 
   const onToolbarButtonDown = (e: React.MouseEvent) => {
-      e.preventDefault(); // Prevents focus loss from editor
+      e.preventDefault(); 
   };
 
   return (
@@ -767,8 +799,9 @@ export const Editor: React.FC<EditorProps> = ({
                         </button>
                         <button
                             onClick={() => toggleViewMode('preview')}
-                            className={`p-1.5 rounded-md transition-all ${viewMode === 'preview' ? 'bg-white dark:bg-gray-700 shadow text-purple-600 dark:text-purple-400' : 'text-gray-500 hover:text-gray-700'}`}
-                            title="Source Code"
+                            disabled={true} // PERMANENT LOCK
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'preview' ? 'bg-white dark:bg-gray-700 shadow text-purple-600 dark:text-purple-400' : 'text-gray-500 hover:text-gray-700'} opacity-50 cursor-not-allowed`}
+                            title={"Source Code view is disabled due to instability."}
                         >
                             <Code size={16} />
                         </button>
@@ -819,9 +852,9 @@ export const Editor: React.FC<EditorProps> = ({
           <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('insertOrderedList')}><ListOrdered size={18}/></button>
           <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={insertChecklist}><CheckSquare size={18}/></button>
           <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
-          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<blockquote>')}><Quote size={18}/></button>
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', 'blockquote')}><Quote size={18}/></button>
           <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<pre>')}><Code size={18}/></button>
-          <button className={toolbarBtnClass} onClick={() => {
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => {
               const sel = window.getSelection();
               if (sel && sel.rangeCount > 0) savedSelection.current = sel.getRangeAt(0);
               fileInputRef.current?.click();

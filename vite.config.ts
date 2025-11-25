@@ -7,7 +7,8 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      // Include the new PWA assets
+      includeAssets: ['pwa-512x512.png', 'pwa-192x192.png'], 
       manifest: {
         name: 'VolumeVault21',
         short_name: 'VolumeVault',
@@ -15,9 +16,15 @@ export default defineConfig({
         theme_color: '#ffffff',
         icons: [
           {
-            src: 'icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
             purpose: 'any maskable'
           }
         ]
@@ -32,6 +39,19 @@ export default defineConfig({
     },
     watch: {
         usePolling: true
+    },
+    // CRITICAL FIX: Proxy /api and /uploads traffic from Vite (2100) to Express (3000)
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false, // Ensure this isn't causing issues
+      },
+      '/uploads': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false, // Ensure this isn't causing issues
+      }
     }
   }
 });
