@@ -2,19 +2,11 @@ name: volumevault21
 
 services:
   app:
-    # Pulls the latest stable release from Docker Hub
     image: volumedata21/volumevault21:latest
     container_name: volumevault21
-    
-    # Map port 2100 on the host to 2100 in the container
-    # You can change the first number (e.g., "8080:2100") if you want it on port 8080
     ports:
       - "2100:2100"
-    
-    # Persist data to a local folder named "data"
-    # This ensures notes survive container updates
     volumes:
       - ./data:/data
-    
-    # Automatically restart the container if it crashes or the server reboots
     restart: unless-stopped
+    user: 1000:1000
