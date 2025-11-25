@@ -48,6 +48,7 @@ app.use((req, res, next) => {
 app.post('/api/upload', upload.single('image'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     console.log(`[SERVER] Image uploaded: ${req.file.filename}`);
+    // Respond with a public URL that can be used in the Markdown content
     res.json({ url: `/uploads/${req.file.filename}` });
 });
 
@@ -111,17 +112,20 @@ app.delete('/api/notes/:id', (req, res) => {
 });
 
 // --- SERVE FRONTEND ---
+
+// Serve files from the uploads directory (used by the new image links)
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 if (process.env.NODE_ENV === 'production') {
+    // Serve the built client files
     app.use(express.static(path.join(__dirname, 'dist')));
     
-    // FINAL FIX: Use app.use() to serve index.html for any remaining route.
-    // This is the most reliable method for client-side routing in Express 5.
-    app.use((req, res) => {
-        if (!req.path.startsWith('/api')) {
+    // FIX: Use a catch-all route to serve index.html for client-side routing
+    app.get('*', (req, res) => {
+         // Prevent API routes from being caught here and only serve index.html for GET requests
+         if (!req.path.startsWith('/api') && req.method === 'GET') {
              res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-        }
+         }
     });
 }
 
