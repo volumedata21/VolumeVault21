@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppSettings } from '../types';
-import { X, Save, Clock, Server, RefreshCw, CheckCircle, XCircle, Download } from 'lucide-react'; // Added Download
+import { X, Save, Clock, Server, RefreshCw, Database, Download } from 'lucide-react';
 import { noteService } from '../services/noteService';
 
 interface SettingsModalProps {
@@ -8,7 +8,7 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: AppSettings;
   onUpdateSettings: (settings: AppSettings) => void;
-  onExport: () => void; // <--- ADDED PROP
+  onExport: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -16,49 +16,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   settings,
   onUpdateSettings,
-  onExport, // <--- Destructure
+  onExport
 }) => {
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<string>(''); 
+  const [syncStatus, setSyncStatus] = useState<string>('');
 
   if (!isOpen) return null;
 
   const handleSync = async () => {
     setIsSyncing(true);
     setSyncStatus('Syncing...');
-    
     try {
-        await noteService.sync();
-        setSyncStatus('Sync complete! Changes pulled from server.');
-        setTimeout(() => setSyncStatus(''), 5000);
+        // We use a simplified sync call that doesn't rely on user-entered keys
+        // It assumes the backend is configured at /api/sync relative to the domain
+        await noteService.syncNotes(settings.serverUrl, settings.serverApiKey);
+        setSyncStatus('Sync complete!');
+        setTimeout(() => setSyncStatus(''), 3000);
     } catch (e) {
-        setSyncStatus('Sync failed. Check your network connection.');
-        setTimeout(() => setSyncStatus(''), 5000);
+        setSyncStatus('Sync failed. Check connection.');
     } finally {
         setIsSyncing(false);
     }
-  };
-  
-  const handleExportClick = () => {
-    onExport();
-    // Optional: Add a brief confirmation message in the modal if needed
-    // setSyncStatus('Backup downloaded!');
-    // setTimeout(() => setSyncStatus(''), 3000);
-  };
-
-  const StatusMessage = () => {
-      if (!syncStatus) return null;
-      
-      const isSuccess = syncStatus.includes('complete') || syncStatus.includes('downloaded');
-      const Icon = isSuccess ? CheckCircle : XCircle;
-      const colorClass = isSuccess ? 'text-green-500' : 'text-red-500';
-
-      return (
-          <p className={`flex items-center gap-2 text-sm text-right ${colorClass} font-medium mt-2`}>
-              <Icon size={16} />
-              {syncStatus}
-          </p>
-      );
   };
 
   return (
@@ -77,43 +55,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
         
         <div className="p-6 space-y-8 overflow-y-auto">
-          {/* Sync & Backup Section (Updated) */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
-              <Server size={16} /> Sync & Backup
-            </h3>
-            
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-                Manually trigger synchronization with your server backend.
-            </p>
-
-            <div className="flex flex-col gap-3">
-                <button 
-                    onClick={handleSync}
-                    disabled={isSyncing}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 transition-all"
-                >
-                    <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
-                    {isSyncing ? "Syncing..." : "Sync Now"}
-                </button>
-                
-                {/* BACKUP BUTTON MOVED HERE */}
-                <button 
-                    onClick={handleExportClick}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg text-sm font-bold hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
-                >
-                    <Download size={16} />
-                    Download JSON Backup
-                </button>
-            </div>
-            
-            <div className="text-right">
-                <StatusMessage />
-            </div>
-          </div>
-          
           {/* Persistence Section */}
-          <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="space-y-4">
             <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               Saving & Persistence
             </h3>
@@ -159,8 +102,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </p>
               </div>
             </div>
+
+             <div className="flex items-start gap-4">
+              <div className="p-2 bg-orange-100 dark:bg-orange-900/50 rounded-lg text-orange-700 dark:text-orange-300">
+                <Download size={20} />
+              </div>
+              <div>
+                <h4 className="font-semibold text-gray-900 dark:text-gray-100">Backup Data</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Download a JSON backup of all your notes.
+                </p>
+                 <button onClick={onExport} className="text-xs font-bold bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-3 py-1.5 rounded-md transition-colors text-gray-800 dark:text-gray-200 border border-gray-300 dark:border-gray-600">
+                   Download Backup
+                 </button>
+              </div>
+            </div>
           </div>
-          
+
+          {/* Sync Section */}
+          <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              Server Sync
+            </h3>
+
+            <div className="flex items-start gap-4">
+                <div className="pt-2">
+                     <div className="p-2 bg-green-100 dark:bg-green-900/50 rounded-lg text-green-700 dark:text-green-300">
+                        <Database size={20} />
+                     </div>
+                </div>
+                <div className="flex-1 space-y-3">
+                    <div>
+                        <h4 className="font-semibold text-gray-900 dark:text-gray-100">Backend Connection</h4>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Sync notes with the configured backend database.
+                        </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={handleSync}
+                            disabled={isSyncing}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors w-full justify-center"
+                        >
+                            <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
+                            {isSyncing ? "Syncing..." : "Sync Now"}
+                        </button>
+                    </div>
+                    {syncStatus && (
+                        <p className={`text-xs text-center font-medium ${syncStatus.includes('failed') ? 'text-red-500' : 'text-green-600'}`}>
+                            {syncStatus}
+                        </p>
+                    )}
+                </div>
+            </div>
+          </div>
         </div>
 
         <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex justify-end flex-shrink-0">

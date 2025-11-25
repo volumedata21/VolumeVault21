@@ -2,85 +2,86 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { Note, AppSettings } from '../types';
 import { 
   Save, Check, Bold, Italic, Underline, Strikethrough, Heading1, Heading2, 
-  List, ListOrdered, Code, Quote, Link as LinkIcon, Tag,
-  FileCode, Eye, CheckSquare, Image as ImageIcon, Undo, Redo, Trash2, Copy
-} from 'lucide-react'; 
+  List, ListOrdered, Code, Quote, Tag,
+  FileCode, Eye, CheckSquare, Image as ImageIcon, Lock, X, Trash2, RotateCcw
+} from 'lucide-react';
 // @ts-ignore
 import { marked } from 'marked';
 // @ts-ignore
 import TurndownService from 'turndown';
 
-// --- HISTORY TYPES ---
-interface HistoryState {
-  content: string;
-  title: string;
-  category: string;
-  timestamp: number;
-}
+// Configure Marked globally once to prevent recursion from repeated .use() calls
+const renderer = new marked.Renderer();
+// @ts-ignore
+renderer.listitem = function(item: any) {
+   let text = '';
+   let task = false;
+   let checked = false;
+
+   if (typeof item === 'object' && item !== null && 'text' in item) {
+       text = item.text;
+       task = item.task || false;
+       checked = item.checked || false;
+   } else {
+       text = item;
+       // @ts-ignore
+       task = arguments[1];
+       // @ts-ignore
+       checked = arguments[2];
+   }
+
+  if (task) {
+    // Fix for double checkbox issue: Marked sometimes includes the checkbox HTML in the text
+    const cleanText = text.replace(/^<input[^>]+>\s*/, '');
+
+    return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
+      <input type="checkbox" ${checked ? 'checked' : ''} style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
+      <span style="flex: 1; min-width: 0; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${cleanText}</span>
+    </li>`;
+  }
+  return `<li>${text}</li>`;
+};
+marked.use({ renderer, gfm: true });
 
 interface EditorProps {
   note: Note;
-  onChange: (updates: Partial<Note>) => void;
+  onChange: (updates: Partial<Note>, saveToDisk?: boolean) => void;
   onSave: () => void;
-  onDelete: () => void;
   settings: AppSettings;
   availableCategories: string[];
+  onRestore?: () => void;
+  onDeleteForever?: () => void;
 }
 
-// Gold standard debouncing function for autosave/history
-const debounce = (func: Function, delay: number) => {
-    let timeoutId: NodeJS.Timeout | null;
-    return (...args: any) => {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-            func(...args);
-            timeoutId = null;
-        }, delay);
-    };
-};
-
-// Debounce for saving the entire note to disk/server (3 seconds)
-const debouncedSaveToDisk = debounce((saveFunc: () => void) => {
-    saveFunc();
-}, 3000); 
-
+const DEFAULT_CONTENT = '# New Note\n\nStart writing here...';
+const DEFAULT_TITLE = 'Untitled Note';
 
 export const Editor: React.FC<EditorProps> = ({ 
   note, 
   onChange, 
   onSave, 
-  onDelete, 
   settings,
-  availableCategories
+  availableCategories,
+  onRestore,
+  onDeleteForever
 }) => {
-  // --- STATE ---
-  const [currentContent, setCurrentContent] = useState(note.content);
   const [title, setTitle] = useState(note.title);
   const [category, setCategory] = useState(note.category || 'General');
+  const [tags, setTags] = useState<string[]>(note.tags || []);
+  const [tagInput, setTagInput] = useState('');
   
   const [isDirty, setIsDirty] = useState(false);
-  const [isSourceMode, setIsSourceMode] = useState(false);
-  // isReadMode is removed from state, ensuring the editor is always editable.
-
-  // --- HISTORY STATE ---
-  const [history, setHistory] = useState<HistoryState[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // --- REFS ---
+  const [viewMode, setViewMode] = useState<'edit' | 'preview' | 'readOnly'>('edit');
+  const [editorContent, setEditorContent] = useState('');
+  
   const contentEditableRef = useRef<HTMLDivElement>(null);
   const sourceTextareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const savedSelection = useRef<Range | null>(null);
-  const isInternalUpdate = useRef<NodeJS.Timeout | null>(null);
-  const isCheckboxClick = useRef(false);
 
-  const isDefaultContent = useMemo(() => {
-    if (isSourceMode) return currentContent.includes('# New Note') && currentContent.includes('Start writing here');
-    const text = contentEditableRef.current?.innerText || '';
-    return text.includes('New Note') && text.includes('Start writing here');
-  }, [currentContent, isSourceMode, title]);
+  const isTrashed = note.deleted || false;
 
+  // Turndown service for HTML -> Markdown conversion
   const turndownService = useMemo(() => {
     const service = new TurndownService({
       headingStyle: 'atx',
@@ -90,8 +91,7 @@ export const Editor: React.FC<EditorProps> = ({
       filter: 'input',
       replacement: function (_content: any, node: any) {
           if (node.type === 'checkbox') {
-              const isChecked = node.hasAttribute('checked') || node.checked;
-              return isChecked ? '[x] ' : '[ ] ';
+              return node.checked ? '[x] ' : '[ ] ';
           }
           return '';
       }
@@ -99,372 +99,262 @@ export const Editor: React.FC<EditorProps> = ({
     return service;
   }, []);
 
-  // --- CODE BLOCK AND CHECKLIST RENDERER (FINAL STABLE VERSION) ---
+  // Initialize state when note changes
   useEffect(() => {
-     
-     // Expose copy function globally so HTML onclick can access it
-     // @ts-ignore
-     window.copyCodeFromButton = (button: HTMLElement) => {
-         const targetId = button.getAttribute('data-code-target');
-         const preElement = document.getElementById(targetId!);
-         if (preElement) {
-             const code = preElement.querySelector('code')!.textContent || '';
-             
-             const tempTextArea = document.createElement('textarea');
-             tempTextArea.value = code;
-             document.body.appendChild(tempTextArea);
-             tempTextArea.select();
-             
-             const success = document.execCommand('copy');
-             document.body.removeChild(tempTextArea);
-             
-             const originalText = button.innerHTML;
-             button.innerHTML = success ? '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!' : 'Failed';
-             
-             setTimeout(() => {
-                 if (button.textContent && button.textContent.includes('Copied')) {
-                     button.innerHTML = originalText;
-                 }
-             }, 1500);
-         }
-     };
-
-    const renderer = new marked.Renderer();
-     
-     // 1. Checkbox List Renderer 
-     // @ts-ignore
-     renderer.listitem = function(item: any) {
-        let text = '';
-        let task = false;
-        let checked = false;
-
-        if (typeof item === 'object' && item !== null && 'text' in item) {
-            text = item.text;
-            task = item.task || false;
-            checked = item.checked || false;
-        } else {
-            text = item;
-            // @ts-ignore
-            task = arguments[1];
-            // @ts-ignore
-            checked = arguments[2];
-        }
-
-       if (task) {
-         const cleanText = text.replace(/^<input[^>]+>/, '').trim();
-         const checkedAttr = checked ? 'checked="checked"' : '';
-         return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
-           <input type="checkbox" ${checkedAttr} style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
-           <span style="flex: 1; min-width: 0; line-height: 1.5; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${cleanText}</span>
-         </li>`;
-       }
-       return `<li>${text}</li>`;
-     };
-     
-     // 2. Code Block Renderer
-     // @ts-ignore
-     renderer.code = function(code, language) {
-         const langDisplay = language || 'code';
-         const id = `code-${Math.random().toString(36).substring(2, 9)}`;
-
-         return `
-            <div class="relative group my-4 rounded-lg bg-gray-800 dark:bg-gray-900 shadow-md">
-                <div class="flex items-center justify-between px-4 py-2 bg-gray-700 dark:bg-gray-800 rounded-t-lg text-xs text-gray-400">
-                    <span>${langDisplay.toUpperCase()}</span>
-                    <button 
-                        data-code-target="${id}"
-                        class="text-gray-400 hover:text-white transition-colors flex items-center gap-1 p-1 rounded hover:bg-gray-700"
-                        onclick="window.copyCodeFromButton(this)"
-                        title="Copy code to clipboard"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                        Copy
-                    </button>
-                </div>
-                <pre id="${id}" class="!p-4 !m-0 overflow-x-auto text-sm font-mono text-gray-200"><code>${code}</code></pre>
-            </div>
-         `;
-     };
-
-     marked.use({ renderer, gfm: true });
-  }, []);
-
-  // --- HARD RESET WHEN NOTE CHANGES ---
-  useEffect(() => {
-    if (isInternalUpdate.current) clearTimeout(isInternalUpdate.current);
-    if (historyTimeoutRef.current) clearTimeout(historyTimeoutRef.current);
-
     setTitle(note.title);
     setCategory(note.category || 'General');
-    setCurrentContent(note.content);
+    setTags(note.tags || []);
     setIsDirty(false);
-    // isReadMode is implicitly false
+
+    // Initial render
+    const html = marked.parse(note.content) as string;
+    setEditorContent(viewMode === 'preview' ? note.content : html);
     
-    setHistory([{ 
-        content: note.content, 
-        title: note.title, 
-        category: note.category || 'General',
-        timestamp: Date.now() 
-    }]);
-    setHistoryIndex(0);
+    // Force readOnly if trashed, restore to edit if not
+    if (note.deleted) {
+        setViewMode('readOnly');
+    } else {
+        setViewMode('edit');
+    }
 
-    if (!isSourceMode && contentEditableRef.current) {
-        const html = marked.parse(note.content) as string;
+    if (contentEditableRef.current && viewMode !== 'preview') {
         contentEditableRef.current.innerHTML = html;
+        attachCopyButtons();
     }
-  }, [note.id]);
+  }, [note.id, note.deleted]);
 
+  // Handle Copy Code Buttons
+  const attachCopyButtons = useCallback(() => {
+    if (!contentEditableRef.current) return;
+    const preBlocks = contentEditableRef.current.querySelectorAll('pre');
+    
+    preBlocks.forEach((pre) => {
+        if (pre.parentNode && (pre.parentNode as HTMLElement).classList.contains('code-wrapper')) return;
+
+        // Wrap pre in relative container
+        const wrapper = document.createElement('div');
+        wrapper.className = 'code-wrapper relative group';
+        pre.parentNode?.insertBefore(wrapper, pre);
+        wrapper.appendChild(pre);
+
+        // Create button
+        const btn = document.createElement('button');
+        btn.className = 'absolute top-2 right-2 p-1.5 bg-gray-700/50 hover:bg-gray-700 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10';
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2-2v1"></path></svg>`;
+        btn.title = 'Copy code';
+        
+        btn.onclick = (e) => {
+            e.stopPropagation(); // Prevent editor focus
+            e.preventDefault();
+            const code = pre.textContent || '';
+            navigator.clipboard.writeText(code);
+            
+            // Temporary feedback
+            btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+            setTimeout(() => {
+                 btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2-2v1"></path></svg>`;
+            }, 2000);
+        };
+
+        wrapper.appendChild(btn);
+    });
+  }, []);
+
+  // Re-attach buttons when content updates
   useEffect(() => {
-      if (!isSourceMode && contentEditableRef.current) {
-          const html = marked.parse(currentContent) as string;
-          if (contentEditableRef.current.innerHTML !== html) {
-              contentEditableRef.current.innerHTML = html;
-          }
+      if (viewMode !== 'preview') {
+          attachCopyButtons();
       }
-  }, [isSourceMode]); 
-  
-  // --- END OF CORE RENDERING ---
-  
-  // Gold Standard: Centralized data change and autosave management
-  const handleDataChange = (updates: { title?: string, category?: string, content?: string }) => {
-      const prevContent = currentContent;
-      
-      if (updates.title !== undefined) setTitle(updates.title);
-      if (updates.category !== undefined) setCategory(updates.category);
-      if (updates.content !== undefined) setCurrentContent(updates.content);
+  }, [editorContent, viewMode, attachCopyButtons]);
 
-      setIsDirty(true);
-
-      // 1. History Snapshot Logic
-      if (updates.content !== undefined && updates.content !== prevContent) {
-          pushToHistory(updates.content, updates.title ?? title, updates.category ?? category);
-      } else if (updates.title !== undefined || updates.category !== undefined) {
-           pushToHistory(currentContent, updates.title ?? title, updates.category ?? category);
+  // Debounced Save for Title Only. 
+  // Category and Tags are saved immediately to support search indexing and prevent loss on switch.
+  useEffect(() => {
+    if (isTrashed) return;
+    const timer = setTimeout(() => {
+      if (title !== note.title) {
+        onChange({ title });
       }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [title, isTrashed]);
 
-      // 2. Parent Update (Debounced)
-      if (isInternalUpdate.current) clearTimeout(isInternalUpdate.current);
-      // @ts-ignore
-      isInternalUpdate.current = setTimeout(() => {
-          onChange(updates);
-          
-          // 3. Gold Standard Autosave: Save to Disk (only if enabled)
-          if (settings.autoSave) {
-              debouncedSaveToDisk(handleManualSave); // Use debounced function for disk writes
-          }
-
-      }, 500);
-  };
-
-  const pushToHistory = useCallback((newContent: string, newTitle: string, newCat: string) => {
-      if (historyTimeoutRef.current) clearTimeout(historyTimeoutRef.current);
-      historyTimeoutRef.current = setTimeout(() => {
-          setHistory(prev => {
-              const current = prev[historyIndex];
-              // Only push if significantly changed
-              if (current && current.content === newContent && current.title === newTitle && current.category === newCat) {
-                  return prev;
-              }
-              const newHistory = prev.slice(0, historyIndex + 1);
-              newHistory.push({
-                  content: newContent,
-                  title: newTitle,
-                  category: newCat,
-                  timestamp: Date.now()
-              });
-              if (newHistory.length > 50) newHistory.shift();
-              return newHistory;
-          });
-          setHistoryIndex(prev => Math.min(prev + 1, 49));
-      }, 500); // Reduced history debounce to 500ms for responsiveness
-  }, [historyIndex]);
-
-  // ... (handleUndo, handleRedo, restoreState remain the same) ...
-  const handleUndo = () => {
-      if (historyIndex > 0) {
-          const newIndex = historyIndex - 1;
-          const state = history[newIndex];
-          setHistoryIndex(newIndex);
-          restoreState(state);
-      }
-  };
-
-  const handleRedo = () => {
-      if (historyIndex < history.length - 1) {
-          const newIndex = historyIndex + 1;
-          const state = history[newIndex];
-          setHistoryIndex(newIndex);
-          restoreState(state);
-      }
-  };
-
-  const restoreState = (state: HistoryState) => {
-      setTitle(state.title);
-      setCategory(state.category);
-      setCurrentContent(state.content);
-      if (!isSourceMode && contentEditableRef.current) {
-          contentEditableRef.current.innerHTML = marked.parse(state.content) as string;
-      }
-      onChange({ title: state.title, category: state.category, content: state.content });
-  };
-
-  const handleVisualInput = () => {
-    if (contentEditableRef.current) {
-      const html = contentEditableRef.current.innerHTML;
-      const md = turndownService.turndown(html);
-      // OPTIMIZATION: Call the generic handler for content updates
-      handleDataChange({ content: md }); 
+  // Mark dirty
+  useEffect(() => {
+    if (isTrashed) return;
+    if (title !== note.title || category !== note.category || JSON.stringify(tags) !== JSON.stringify(note.tags)) {
+       setIsDirty(true);
     }
-  };
+  }, [title, category, tags, note.title, note.category, note.tags, isTrashed]);
 
-  const handleSourceInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      handleDataChange({ content: e.target.value });
-  };
+  // AutoSave
+  useEffect(() => {
+    if (isTrashed) return;
+    if (!settings.autoSave) return;
+    const timer = setInterval(() => {
+      if (isDirty) handleManualSave();
+    }, settings.saveInterval);
+    return () => clearInterval(timer);
+  }, [settings.autoSave, settings.saveInterval, isDirty, isTrashed]);
 
+  // Shortcuts
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault();
         handleManualSave();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        handleUndo();
-      }
-      if (((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'z') || 
-          ((e.metaKey || e.ctrlKey) && e.key === 'y')) {
-        e.preventDefault();
-        handleRedo();
-      }
     };
-    window.addEventListener('keydown', handleGlobalKeyDown);
+    if (!isTrashed) {
+        window.addEventListener('keydown', handleGlobalKeyDown);
+    }
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [historyIndex, history]);
-
-  useEffect(() => {
-    // We rely on handleDataChange's debouncedSaveToDisk now, 
-    // but keep this simple interval running if needed or if debouncedSaveToDisk isn't triggered frequently enough.
-    if (!settings.autoSave) return;
-    const timer = setInterval(() => {
-        if (isDirty) handleManualSave();
-    }, settings.saveInterval);
-    return () => clearInterval(timer);
-  }, [settings.autoSave, settings.saveInterval, isDirty, currentContent, title, category]);
-
+  }, [title, category, editorContent, tags, isTrashed]);
 
   const handleManualSave = () => {
-    let contentToSave = currentContent;
-    if (!isSourceMode && contentEditableRef.current) {
-        const html = contentEditableRef.current.innerHTML;
+    if (isTrashed) return;
+    let contentToSave = '';
+    if (viewMode === 'preview') {
+        contentToSave = sourceTextareaRef.current?.value || '';
+    } else {
+        const html = contentEditableRef.current?.innerHTML || '';
         contentToSave = turndownService.turndown(html);
     }
-    onChange({ title, category, content: contentToSave });
+    // Force save to disk on manual save
+    onChange({ title, category, tags, content: contentToSave }, true);
     onSave();
     setIsDirty(false);
   };
 
-  const toggleMode = () => {
-      // If switching modes, ensure we are not in read mode (we are entering editing mode)
-      setIsSourceMode(prev => {
-          if (!prev) {
-              // Switching TO Source Mode
-              const html = contentEditableRef.current?.innerHTML || '';
-              const md = turndownService.turndown(html);
-              setCurrentContent(md);
-          }
-          return !prev;
-      });
+  const handleVisualInput = () => {
+    if (isTrashed) return;
+    if (contentEditableRef.current) {
+      const html = contentEditableRef.current.innerHTML;
+      const md = turndownService.turndown(html);
+      onChange({ content: md });
+      setIsDirty(true);
+    }
   };
-  
-  // Read mode toggle is now removed
+
+  const handleSourceInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      if (isTrashed) return;
+      const val = e.target.value;
+      setEditorContent(val);
+      onChange({ content: val });
+      setIsDirty(true);
+  };
+
+  const toggleViewMode = (mode: 'edit' | 'preview' | 'readOnly') => {
+      if (isTrashed && mode === 'edit') return; // Cannot edit trashed notes
+      
+      if (viewMode === 'preview' && mode !== 'preview') {
+          // Exiting source mode
+          const html = marked.parse(editorContent) as string;
+          setEditorContent(html);
+          if (contentEditableRef.current) {
+              contentEditableRef.current.innerHTML = html;
+              attachCopyButtons();
+          }
+      } else if (viewMode !== 'preview' && mode === 'preview') {
+          // Entering source mode
+          const html = contentEditableRef.current?.innerHTML || '';
+          const md = turndownService.turndown(html);
+          setEditorContent(md);
+      }
+      setViewMode(mode);
+  };
 
   const execCmd = (command: string, value: string | undefined = undefined) => {
-    if (contentEditableRef.current) contentEditableRef.current.focus();
+    if (viewMode === 'readOnly' || isTrashed) return;
+    if (contentEditableRef.current) {
+        contentEditableRef.current.focus();
+    }
     document.execCommand(command, false, value);
     
-    // FEATURE RESTORATION FIX: Restore block break-out logic and set caret inside
-    if (command === 'formatBlock' && (value === 'pre' || value === 'blockquote' || value === '<pre>' || value === '<blockquote>')) {
+    // Improved logic: If creating a block element, insert a spacer below it to allow exit
+    if (command === 'formatBlock' && (value === '<pre>' || value === '<blockquote>')) {
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
             let node = selection.anchorNode as Node | null;
-            
-            // Traverse up to find the block element
             while (node && node.nodeName !== 'PRE' && node.nodeName !== 'BLOCKQUOTE' && node !== contentEditableRef.current) {
                 node = node.parentNode;
             }
 
             if (node && (node.nodeName === 'PRE' || node.nodeName === 'BLOCKQUOTE')) {
                 const blockNode = node as HTMLElement;
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
                 
-                const range = document.createRange();
-                const sel = window.getSelection();
-                
-                // Place cursor at the start of the block's content
-                range.setStart(blockNode.firstChild || blockNode, 0); 
-                range.collapse(true);
-                sel?.removeAllRanges();
-                sel?.addRange(range);
-            }
-        }
-    }
-    handleVisualInput();
-  };
-  
-  const insertChecklist = () => {
-    document.execCommand('insertUnorderedList');
-    const selection = window.getSelection();
-    if (!selection?.rangeCount) return;
-    let node = selection.anchorNode;
-    while (node && node.nodeName !== 'UL' && node !== contentEditableRef.current) {
-        node = node.parentNode;
-    }
-    if (node && node.nodeName === 'UL') {
-        const ul = node as HTMLUlistElement;
-        Array.from(ul.querySelectorAll('li')).forEach(li => {
-            if (!li.querySelector('input[type="checkbox"]')) {
-                li.style.listStyle = 'none';
-                li.style.display = 'flex';
-                li.style.alignItems = 'flex-start';
-                li.classList.add('checklist-item');
-                li.style.marginBottom = '0.25rem';
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.style.marginTop = '0.35rem';
-                checkbox.style.marginRight = '0.5rem';
-                checkbox.style.flexShrink = '0';
-                const span = document.createElement('span');
-                span.style.flex = '1';
-                span.style.minWidth = '0';
-                span.style.lineHeight = '1.5';
-                while (li.firstChild) {
-                    span.appendChild(li.firstChild);
+                if (blockNode.nextSibling) {
+                    blockNode.parentNode?.insertBefore(p, blockNode.nextSibling);
+                } else {
+                    blockNode.parentNode?.appendChild(p);
                 }
-                if (!span.textContent?.trim()) span.innerHTML = '<br>';
-                li.appendChild(checkbox);
-                li.appendChild(span);
             }
-        });
-        const firstSpan = ul.querySelector('li span');
-        if (firstSpan) {
-            const range = document.createRange();
-            range.setStart(firstSpan, 0);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
         }
     }
     handleVisualInput();
+    attachCopyButtons();
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const insertChecklist = () => {
+      if (viewMode === 'readOnly' || isTrashed) return;
+      if (contentEditableRef.current) contentEditableRef.current.focus();
+
+      const uniqueId = `cl-${Date.now()}`;
+      // Match the renderer/Enter key style structure and use <br> instead of &nbsp;
+      const html = `<ul style="list-style: none;">
+        <li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
+            <input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
+            <span id="${uniqueId}" style="flex: 1; min-width: 0;"><br></span>
+        </li>
+      </ul>`;
+
+      document.execCommand('insertHTML', false, html);
+      
+      const span = document.getElementById(uniqueId);
+      if (span) {
+          span.removeAttribute('id');
+          const range = document.createRange();
+          range.setStart(span, 0);
+          range.collapse(true);
+          const sel = window.getSelection();
+          if (sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+          }
+      }
+      
+      handleVisualInput();
+  };
+
+  // Tag Handling
+  const addTag = () => {
+    if (isTrashed) return;
+    const cleanTag = tagInput.trim();
+    if (cleanTag && !tags.includes(cleanTag)) {
+        const newTags = [...tags, cleanTag];
+        setTags(newTags);
+        setTagInput('');
+        // Immediate save to disk/app state for tags to ensure search works immediately
+        onChange({ tags: newTags }, true);
+    }
+  };
+
+  const removeTag = (tagToRemove: string) => {
+      if (isTrashed) return;
+      const newTags = tags.filter(t => t !== tagToRemove);
+      setTags(newTags);
+      // Immediate save
+      onChange({ tags: newTags }, true);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const formData = new FormData();
-    formData.append('image', file);
-    try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
-        if (!res.ok) throw new Error('Upload failed');
-        const data = await res.json();
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
         if (savedSelection.current) {
             const sel = window.getSelection();
             sel?.removeAllRanges();
@@ -472,53 +362,97 @@ export const Editor: React.FC<EditorProps> = ({
         } else {
             contentEditableRef.current?.focus();
         }
-        execCmd('insertImage', data.url);
-    } catch (err) {
-        console.error(err);
-        alert('Failed to upload image');
+        execCmd('insertImage', base64);
+      };
+      reader.readAsDataURL(file);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Editor Interactivity
   const handleEditorClick = (e: React.MouseEvent) => {
+    // Checkbox toggling (works in ReadOnly too)
     const target = e.target as HTMLElement;
-    
-    // Checkbox interaction logic (works in both modes)
     if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
         const checkbox = target as HTMLInputElement;
         const li = checkbox.closest('li');
         const span = li?.querySelector('span');
         
-        isCheckboxClick.current = true; 
-
-        if (checkbox.checked) checkbox.setAttribute('checked', 'checked');
-        else checkbox.removeAttribute('checked');
-
-        // OPTIMIZATION FIX: Run logic synchronously for instant feel
-        if (checkbox.checked) {
-            if (span) {
-                span.style.textDecoration = 'line-through';
-                span.style.opacity = '0.6';
-                span.style.color = '#6b7280';
-            }
-        } else {
-            if (span) {
-                span.style.textDecoration = 'none';
-                span.style.opacity = '1';
-                span.style.color = '';
-            }
+        // Prevent toggle if trashed
+        if (isTrashed) {
+            e.preventDefault();
+            return;
         }
-        handleVisualInput();
-        isCheckboxClick.current = false; 
+
+        // Allow UI update first
+        setTimeout(() => {
+            if (checkbox.checked) {
+                if (span) {
+                    span.style.textDecoration = 'line-through';
+                    span.style.opacity = '0.6';
+                    span.style.color = '#6b7280';
+                }
+            } else {
+                if (span) {
+                    span.style.textDecoration = 'none';
+                    span.style.opacity = '1';
+                    span.style.color = '';
+                }
+            }
+            // If read-only, we need to manually update content behind the scenes
+            if (viewMode === 'readOnly') {
+               const html = contentEditableRef.current?.innerHTML || '';
+               const md = turndownService.turndown(html);
+               // We don't use onChange here directly to avoid full re-renders that reset scroll, 
+               // but we do need to persist.
+               onChange({ content: md }); 
+               // Note: This won't trigger re-render of Editor component due to how onChange is handled in parent usually,
+               // but allows saving.
+            } else {
+               handleVisualInput();
+            }
+        }, 50);
     }
     
-    // Since there is no dedicated Read Mode feature now, all clicks are handled by the browser/handlers above.
+    // Magic Spacer logic for creating new lines after blocks
+    if (viewMode === 'edit' && target === e.currentTarget) {
+        const content = contentEditableRef.current;
+        if (!content) return;
+        const lastChild = content.lastElementChild;
+        if (lastChild && (lastChild.nodeName === 'PRE' || lastChild.nodeName === 'BLOCKQUOTE')) {
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+            content.appendChild(p);
+            
+            const range = document.createRange();
+            range.setStart(p, 0);
+            range.collapse(true);
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+            
+            handleVisualInput();
+        }
+    }
   };
 
   const handleEditorKeyDown = (e: React.KeyboardEvent) => {
-    // Standard keyboard logic only applies in Edit/Source mode
-    if (isSourceMode) return;
+    if (viewMode !== 'edit' || isTrashed) return;
     
+    // Keyboard Shortcuts
+    if (e.metaKey || e.ctrlKey) {
+        const key = e.key.toLowerCase();
+        if (!e.shiftKey) {
+            if (key === 'b') { e.preventDefault(); execCmd('bold'); return; }
+            if (key === 'i') { e.preventDefault(); execCmd('italic'); return; }
+            if (key === 'u') { e.preventDefault(); execCmd('underline'); return; }
+        } else {
+            // Strikethrough (Ctrl+Shift+X or Ctrl+Shift+S)
+            if (key === 'x' || key === 's') { e.preventDefault(); execCmd('strikeThrough'); return; }
+        }
+    }
+    
+    // "Gold Standard" Break out of Block
     const breakOutOfBlock = (nodeName: string) => {
         const selection = window.getSelection();
         if (!selection || !selection.rangeCount) return false;
@@ -531,6 +465,7 @@ export const Editor: React.FC<EditorProps> = ({
              p.innerHTML = '<br>';
              if (node.nextSibling) node.parentNode?.insertBefore(p, node.nextSibling);
              else node.parentNode?.appendChild(p);
+             
              const range = document.createRange();
              range.setStart(p, 0);
              range.collapse(true);
@@ -540,13 +475,104 @@ export const Editor: React.FC<EditorProps> = ({
         }
         return false;
     };
-    if (e.key === 'Enter' && e.shiftKey) {
-        if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
-            e.preventDefault();
-            return;
+
+    if (e.key === 'Enter') {
+        if (e.shiftKey) {
+             if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
+                e.preventDefault();
+                return;
+             }
+        }
+        
+        // Checklist Gold Standard Logic
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            let li = range.startContainer as HTMLElement;
+            // Traverse up safely
+            while (li && li.nodeName !== 'LI' && li !== contentEditableRef.current) {
+                li = li.parentNode as HTMLElement;
+            }
+
+            if (li && li.nodeName === 'LI') {
+                const checkbox = li.querySelector('input[type="checkbox"]');
+                if (checkbox) {
+                    // It's a checklist item
+                    e.preventDefault();
+                    
+                    // Check content to see if empty
+                    const span = li.querySelector('span');
+                    const textContent = span ? span.textContent || '' : li.textContent || '';
+                    const isEmpty = textContent.trim() === '';
+
+                    if (isEmpty) {
+                        // Empty -> Convert to Paragraph (break out)
+                        const ul = li.parentElement;
+                        const p = document.createElement('p');
+                        p.innerHTML = '<br>';
+                        
+                        if (ul) {
+                            if (li.nextSibling) {
+                                ul.parentNode?.insertBefore(p, ul.nextSibling);
+                                // If inside a middle, we might need to split list, but for now just move out
+                            } else {
+                                ul.parentNode?.insertBefore(p, ul.nextSibling);
+                            }
+                            li.remove();
+                            if (ul.children.length === 0) ul.remove();
+                        } else {
+                            // Fallback if no UL parent (rare)
+                            li.replaceWith(p);
+                        }
+                        
+                        // Focus new paragraph
+                        const newRange = document.createRange();
+                        newRange.setStart(p, 0);
+                        newRange.collapse(true);
+                        selection.removeAllRanges();
+                        selection.addRange(newRange);
+                    } else {
+                        // Not empty -> New Checkbox
+                        const newLi = document.createElement('li');
+                        newLi.className = 'checklist-item';
+                        newLi.style.cssText = 'list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;';
+                        newLi.innerHTML = `<input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;"><span><br></span>`;
+                        
+                        if (li.nextSibling) {
+                            li.parentNode?.insertBefore(newLi, li.nextSibling);
+                        } else {
+                            li.parentNode?.appendChild(newLi);
+                        }
+                        
+                        // Focus new checkbox span
+                        const newSpan = newLi.querySelector('span');
+                        if (newSpan) {
+                            const newRange = document.createRange();
+                            newRange.setStart(newSpan, 0);
+                            newRange.collapse(true);
+                            selection.removeAllRanges();
+                            selection.addRange(newRange);
+                        }
+                    }
+                    handleVisualInput();
+                    return;
+                }
+            }
+        }
+        
+        // Double Enter at end of block to break out
+        if (selection && selection.isCollapsed) {
+             const node = selection.anchorNode;
+             if (node && (node.textContent === '' || node.textContent === '\n')) {
+                 if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
+                     e.preventDefault();
+                     return;
+                 }
+             }
         }
     }
-    // ... (rest of Enter and Backspace logic remains the same) ...
+    
+    // Handle checklist deletion logic
     if (e.key === 'Backspace') {
         const selection = window.getSelection();
         if (selection && selection.isCollapsed) {
@@ -554,274 +580,284 @@ export const Editor: React.FC<EditorProps> = ({
             while (li && li.nodeName !== 'LI' && li !== contentEditableRef.current) {
                 li = li.parentNode as HTMLElement;
             }
+            
             if (li && li.nodeName === 'LI' && li.querySelector('input[type="checkbox"]')) {
                 const range = selection.getRangeAt(0);
                 const span = li.querySelector('span');
                 const isAtStart = (range.startContainer === span && range.startOffset === 0) ||
                                   (range.startContainer.parentNode === span && range.startOffset === 0);
+
                 if (isAtStart) {
                      e.preventDefault();
                      const checkbox = li.querySelector('input[type="checkbox"]');
                      if (checkbox) checkbox.remove();
                      if (span) {
-                         while(span.firstChild) li.insertBefore(span.firstChild, span);
+                         while(span.firstChild) {
+                             li.insertBefore(span.firstChild, span);
+                         }
                          span.remove();
                      }
-                     li.style.listStyle = '';
-                     li.style.display = '';
+                     li.style.cssText = '';
                      li.classList.remove('checklist-item');
-                     li.style.marginBottom = '';
                      handleVisualInput();
                      return;
                 }
             }
         }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
-        const selection = window.getSelection();
-        if (!selection) return;
-        let li = selection.anchorNode as HTMLElement;
-        while (li && li.nodeName !== 'LI' && li !== contentEditableRef.current) {
-            li = li.parentNode as HTMLElement;
-        }
-        if (li && li.nodeName === 'LI' && li.querySelector('input[type="checkbox"]')) {
-            e.preventDefault(); 
-            const span = li.querySelector('span');
-            const textContent = span ? span.innerText.replace(/\u200B/g, '').trim() : li.innerText.trim();
-            if (textContent === '') {
-                const ul = li.parentNode;
-                if (ul) {
-                    ul.removeChild(li);
-                    const p = document.createElement('p');
-                    p.innerHTML = '<br>';
-                    if (ul.nextSibling) ul.parentNode?.insertBefore(p, ul.nextSibling);
-                    else ul.parentNode?.appendChild(p);
-                    const range = document.createRange();
-                    range.setStart(p, 0);
-                    range.collapse(true);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }
-            } else {
-                const newLi = li.cloneNode(false) as HTMLLIElement;
-                newLi.classList.add('checklist-item');
-                const newCheckbox = document.createElement('input');
-                newCheckbox.type = 'checkbox';
-                newCheckbox.style.marginTop = '0.35rem';
-                newCheckbox.style.marginRight = '0.5rem';
-                newCheckbox.style.flexShrink = '0';
-                const newSpan = document.createElement('span');
-                newSpan.style.flex = '1';
-                newSpan.style.minWidth = '0';
-                newSpan.style.lineHeight = '1.5';
-                newSpan.innerHTML = '<br>'; 
-                newLi.appendChild(newCheckbox);
-                newLi.appendChild(newSpan);
-                if (li.nextSibling) li.parentNode?.insertBefore(newLi, li.nextSibling);
-                else li.parentNode?.appendChild(newLi);
-                const range = document.createRange();
-                range.setStart(newSpan, 0);
-                range.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-            handleVisualInput();
-        }
-    }
   };
 
   const handleTitleFocus = () => {
-    if (title === 'Untitled Note') setTitle('');
+      if (title === DEFAULT_TITLE) {
+          setTitle('');
+      }
   };
 
-  const handleEditorFocus = () => {
-      // Since Read Mode is removed, this simplifies greatly.
-      if (isCheckboxClick.current) {
-          isCheckboxClick.current = false;
-          return;
+  const handleTitleBlur = () => {
+      if (title.trim() === '') {
+          setTitle(DEFAULT_TITLE);
       }
-      
-      const text = contentEditableRef.current?.innerText || '';
+  };
+
+  const handleContentFocus = () => {
+      if (!contentEditableRef.current) return;
+      const text = contentEditableRef.current.innerText || '';
+      // Check loosely for the default content pattern
       if (text.includes('New Note') && text.includes('Start writing here')) {
-          if (contentEditableRef.current) {
-              contentEditableRef.current.innerHTML = '<p><br></p>';
-              const range = document.createRange();
-              const sel = window.getSelection();
-              const p = contentEditableRef.current.querySelector('p');
-              if (p && sel) {
-                  range.setStart(p, 0);
-                  range.collapse(true);
-                  sel.removeAllRanges();
-                  sel.addRange(range);
-              }
-          }
+          contentEditableRef.current.innerHTML = '<p><br></p>';
           handleVisualInput();
       }
   };
 
-  const ToolbarBtn = ({ icon: Icon, label, onClick, active = false, disabled }: any) => (
-    <button
-      onClick={(e) => { e.preventDefault(); onClick(); }}
-      disabled={disabled}
-      className={`p-2 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-30 ${
-        active 
-        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' 
-        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-      }`}
-      title={label}
-    >
-      <Icon size={18} strokeWidth={2} />
-    </button>
-  );
+  const handleContentBlur = () => {
+      if (!contentEditableRef.current) return;
+      const text = contentEditableRef.current.innerText?.trim();
+      // Fix: Check for images or other media so we don't clear content if only an image exists
+      const hasMedia = contentEditableRef.current.querySelector('img, iframe, video, hr, table');
+
+      if (!text && !hasMedia) {
+          // Double check HTML is effectively empty
+          const html = contentEditableRef.current.innerHTML.trim();
+          if (html === '' || html === '<br>' || html === '<p><br></p>') {
+              const html = marked.parse(DEFAULT_CONTENT) as string;
+              contentEditableRef.current.innerHTML = html;
+              handleVisualInput();
+          }
+      }
+  };
+
+  const isPlaceholderTitle = title === DEFAULT_TITLE || title === '';
+  const isPlaceholderContent = useMemo(() => {
+     if (viewMode === 'preview') return false;
+     const text = contentEditableRef.current?.innerText?.trim() || '';
+     return text.includes('New Note') && text.includes('Start writing here');
+  }, [editorContent, note.content]);
+  
+  // Toolbar button style - Changed to dark:text-white
+  const toolbarBtnClass = "p-2 text-gray-700 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors";
+
+  const onToolbarButtonDown = (e: React.MouseEvent) => {
+      e.preventDefault(); // Prevents focus loss from editor
+  };
 
   return (
-    <div className="h-full flex flex-col bg-white dark:bg-gray-900">
+    <div className="h-full flex flex-col bg-white dark:bg-gray-900 relative">
       <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
       
-      {/* HEADER */}
-      <div className="flex flex-col gap-4 p-4 border-b border-gray-200 dark:border-gray-800">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            {/* Darker placeholder text (Placeholder contrast fix) */}
-            <input
-                type="text"
-                value={title}
-                onChange={(e) => handleDataChange({ title: e.target.value })}
-                onFocus={handleTitleFocus}
-                className="text-2xl font-bold bg-transparent border-none focus:ring-0 placeholder-gray-600 dark:placeholder-gray-400 text-gray-900 dark:text-white flex-1 min-w-0"
-                placeholder="Untitled Note"
-            />
-            
-            <div className="flex items-center gap-3 flex-shrink-0">
-                <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
-                    <button 
-                        onClick={handleUndo} 
-                        disabled={historyIndex <= 0}
-                        className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 disabled:opacity-30"
-                        title="Undo (Ctrl+Z)"
-                    >
-                        <Undo size={16} />
-                    </button>
-                    <button 
-                        onClick={handleRedo} 
-                        disabled={historyIndex >= history.length - 1}
-                        className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 disabled:opacity-30"
-                        title="Redo (Ctrl+Shift+Z)"
-                    >
-                        <Redo size={16} />
-                    </button>
-                </div>
-
-                <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-1"></div>
-
-                <button
+      {/* TRASH BANNER */}
+      {isTrashed && (
+        <div className="bg-red-50 dark:bg-red-900/20 px-4 py-3 flex items-center justify-between border-b border-red-100 dark:border-red-900/50">
+             <div className="flex items-center gap-2 text-red-700 dark:text-red-300">
+                 <Trash2 size={18} />
+                 <span className="text-sm font-semibold">This note is in the trash.</span>
+             </div>
+             <div className="flex items-center gap-2">
+                 <button 
+                    onClick={onRestore}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-bold rounded shadow-sm border border-gray-200 dark:border-gray-600 transition-colors"
+                 >
+                    <RotateCcw size={14} /> Restore
+                 </button>
+                 <button 
                     onClick={() => {
-                        if (confirm('Are you sure you want to delete this note?')) {
-                            onDelete();
+                        if (confirm('Delete this note permanently? This action cannot be undone.')) {
+                            onDeleteForever?.();
                         }
                     }}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50"
-                >
-                    <Trash2 size={16} />
-                </button>
-
-                <button
-                    onClick={handleManualSave}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${isDirty ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600'} disabled:opacity-50`}
-                >
-                    {isDirty ? <Save size={16} /> : <Check size={16} />}
-                    <span className="hidden sm:inline">{isDirty ? 'Save' : 'Saved'}</span>
-                </button>
-
-                <button
-                    onClick={toggleMode}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium disabled:opacity-50"
-                >
-                    {isSourceMode ? <Eye size={16} /> : <FileCode size={16} />}
-                    <span className="hidden sm:inline">{isSourceMode ? 'Preview' : 'Markdown'}</span>
-                </button>
-            </div>
-        </div>
-        
-        {/* Removed Read/Edit Mode Toggle from the main header area */}
-        <div className="flex items-center gap-2">
-            <div className="relative group flex items-center">
-                <Tag size={16} className="absolute left-2 text-gray-400" />
-                <input 
-                    type="text" 
-                    list="categories" 
-                    value={category}
-                    onChange={(e) => handleDataChange({ category: e.target.value })}
-                    placeholder="Category"
-                    className="pl-8 pr-3 py-1 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 w-48"
-                />
-                <datalist id="categories">
-                    {availableCategories.map(cat => <option key={cat} value={cat} />)}
-                </datalist>
-            </div>
-        </div>
-      </div>
-
-      {/* TOOLBAR */}
-      {!isSourceMode && (
-        <div className="flex flex-wrap items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 overflow-x-auto">
-          {/* Controls are always active now */}
-          <ToolbarBtn icon={Bold} label="Bold" onClick={() => execCmd('bold')} />
-          <ToolbarBtn icon={Italic} label="Italic" onClick={() => execCmd('italic')} />
-          <ToolbarBtn icon={Underline} label="Underline" onClick={() => execCmd('underline')} />
-          <ToolbarBtn icon={Strikethrough} label="Strikethrough" onClick={() => execCmd('strikeThrough')} />
-          <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
-          <ToolbarBtn icon={Heading1} label="Heading 1" onClick={() => execCmd('formatBlock', '<h1>')} />
-          <ToolbarBtn icon={Heading2} label="Heading 2" onClick={() => execCmd('formatBlock', '<h2>')} />
-          <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
-          <ToolbarBtn icon={List} label="Bullet List" onClick={() => execCmd('insertUnorderedList')} />
-          <ToolbarBtn icon={ListOrdered} label="Numbered List" onClick={() => execCmd('insertOrderedList')} />
-          <ToolbarBtn icon={CheckSquare} label="Checklist" onClick={insertChecklist} />
-          <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
-          <ToolbarBtn icon={Quote} label="Blockquote" onClick={() => execCmd('formatBlock', 'blockquote')} />
-          <ToolbarBtn icon={Code} label="Code Block" onClick={() => execCmd('formatBlock', 'pre')} />
-          <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
-          <ToolbarBtn icon={LinkIcon} label="Link" onClick={() => {
-              const url = prompt('Enter URL:');
-              if (url) execCmd('createLink', url);
-          }} />
-          <ToolbarBtn icon={ImageIcon} label="Image" onClick={() => {
-              const sel = window.getSelection();
-              if (sel && sel.rangeCount > 0) savedSelection.current = sel.getRangeAt(0);
-              fileInputRef.current?.click();
-          }} />
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded shadow-sm transition-colors"
+                 >
+                    Delete Forever
+                 </button>
+             </div>
         </div>
       )}
 
-      {/* EDITOR AREA */}
+      {/* HEADER */}
+      <div className={`flex flex-col gap-4 p-4 border-b border-gray-200 dark:border-gray-800 ${isTrashed ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+            <div className="flex-1 min-w-0 space-y-2">
+                <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    onFocus={handleTitleFocus}
+                    onBlur={handleTitleBlur}
+                    readOnly={viewMode === 'readOnly' || isTrashed}
+                    className={`text-2xl font-bold bg-transparent border-none focus:ring-0 w-full ${
+                        isPlaceholderTitle ? 'text-gray-400 dark:text-gray-500 italic' : 'text-gray-900 dark:text-white'
+                    }`}
+                    placeholder="Untitled Note"
+                />
+                
+                {/* TAGS */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <Tag size={14} className="text-gray-400" />
+                    {tags.map(tag => (
+                        <span key={tag} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                            {tag}
+                            {viewMode !== 'readOnly' && !isTrashed && (
+                                <button onClick={() => removeTag(tag)} className="ml-1 hover:text-blue-600 focus:outline-none">
+                                    <X size={12} />
+                                </button>
+                            )}
+                        </span>
+                    ))}
+                    {viewMode !== 'readOnly' && !isTrashed && (
+                        <input
+                            type="text"
+                            value={tagInput}
+                            onChange={(e) => setTagInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && addTag()}
+                            placeholder="Add tag..."
+                            className="bg-transparent border-none focus:ring-0 text-xs text-gray-600 dark:text-gray-400 placeholder-gray-400 w-24"
+                        />
+                    )}
+                </div>
+            </div>
+            
+            {!isTrashed && (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                        onClick={handleManualSave}
+                        className={`
+                            flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all
+                            ${isDirty 
+                            ? 'bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-800 hover:to-indigo-700 text-white shadow-sm' 
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                            }
+                        `}
+                    >
+                        {isDirty ? <Save size={16} /> : <Check size={16} />}
+                    </button>
+
+                    <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-lg flex items-center">
+                        <button
+                            onClick={() => toggleViewMode('edit')}
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'edit' ? 'bg-white dark:bg-gray-700 shadow text-blue-600 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700'}`}
+                            title="Edit Mode"
+                        >
+                            <FileCode size={16} />
+                        </button>
+                        <button
+                            onClick={() => toggleViewMode('readOnly')}
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'readOnly' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-green-400' : 'text-gray-500 hover:text-gray-700'}`}
+                            title="Read Only Mode"
+                        >
+                            {viewMode === 'readOnly' ? <Lock size={16} /> : <Eye size={16} />}
+                        </button>
+                        <button
+                            onClick={() => toggleViewMode('preview')}
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'preview' ? 'bg-white dark:bg-gray-700 shadow text-purple-600 dark:text-purple-400' : 'text-gray-500 hover:text-gray-700'}`}
+                            title="Source Code"
+                        >
+                            <Code size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+        
+        {/* Category Picker (Only visible in edit mode) */}
+        {viewMode === 'edit' && !isTrashed && (
+            <div className="flex items-center gap-2">
+                 <div className="relative group flex items-center">
+                    <span className="text-xs font-semibold text-gray-500 uppercase mr-2">Category:</span>
+                    <input 
+                        type="text" 
+                        list="categories" 
+                        value={category}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            setCategory(val);
+                            // Immediate save for Category
+                            onChange({ category: val }, true);
+                        }}
+                        className="px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                    />
+                    <datalist id="categories">
+                        {availableCategories.map(cat => (
+                            <option key={cat} value={cat} />
+                        ))}
+                    </datalist>
+                </div>
+            </div>
+        )}
+      </div>
+
+      {/* TOOLBAR */}
+      {viewMode === 'edit' && !isTrashed && (
+        <div className="flex flex-wrap items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 overflow-x-auto">
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('bold')} title="Bold (Ctrl+B)"><Bold size={18}/></button>
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('italic')} title="Italic (Ctrl+I)"><Italic size={18}/></button>
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('underline')} title="Underline (Ctrl+U)"><Underline size={18}/></button>
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('strikeThrough')} title="Strikethrough (Ctrl+Shift+X)"><Strikethrough size={18}/></button>
+          <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<h1>')}><Heading1 size={18}/></button>
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<h2>')}><Heading2 size={18}/></button>
+          <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('insertUnorderedList')}><List size={18}/></button>
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('insertOrderedList')}><ListOrdered size={18}/></button>
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={insertChecklist}><CheckSquare size={18}/></button>
+          <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<blockquote>')}><Quote size={18}/></button>
+          <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<pre>')}><Code size={18}/></button>
+          <button className={toolbarBtnClass} onClick={() => {
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount > 0) savedSelection.current = sel.getRangeAt(0);
+              fileInputRef.current?.click();
+          }}><ImageIcon size={18}/></button>
+        </div>
+      )}
+
+      {/* EDITOR CONTENT */}
       <div className="flex-1 overflow-hidden relative">
-        {isSourceMode ? (
+        {viewMode === 'preview' ? (
             <textarea
                 ref={sourceTextareaRef}
-                value={currentContent}
+                value={editorContent}
                 onChange={handleSourceInput}
                 className="w-full h-full resize-none p-6 bg-white dark:bg-gray-900 font-mono text-sm leading-relaxed text-gray-900 dark:text-gray-200 focus:outline-none"
                 spellCheck={false}
-                placeholder="# Start writing markdown..."
+                disabled={isTrashed}
             />
         ) : (
             <div 
-              className="h-full overflow-y-auto p-8 bg-white dark:bg-gray-900 cursor-text" 
+              className={`h-full overflow-y-auto p-8 bg-white dark:bg-gray-900 ${viewMode === 'readOnly' || isTrashed ? 'cursor-default' : 'cursor-text'}`}
+              onClick={handleEditorClick}
             >
                 <div
                     ref={contentEditableRef}
-                    // CRITICAL FIX: Always editable when not in source mode
-                    contentEditable={true} 
+                    contentEditable={viewMode === 'edit' && !isTrashed}
                     onInput={handleVisualInput}
-                    onClick={handleEditorClick}
                     onKeyDown={handleEditorKeyDown}
-                    onFocus={handleEditorFocus}
+                    onFocus={handleContentFocus}
+                    onBlur={handleContentBlur}
                     className={`
                         prose prose-slate dark:prose-invert max-w-none focus:outline-none min-h-[50vh] 
                         prose-p:my-2 prose-headings:my-4 prose-img:rounded-lg prose-img:shadow-md
                         prose-img:max-h-[400px] prose-img:w-auto prose-img:max-w-full prose-img:object-contain
-                        /* FIX: Darker placeholder text contrast */
-                        ${isDefaultContent ? 'text-slate-700 dark:text-slate-300 opacity-90' : ''}
-                        cursor-text
+                        ${isPlaceholderContent && viewMode === 'edit' ? 'text-gray-300 dark:text-gray-600 italic' : ''}
+                        ${viewMode === 'readOnly' || isTrashed ? 'select-text' : ''}
                     `}
                 />
             </div>

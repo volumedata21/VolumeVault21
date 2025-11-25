@@ -6,11 +6,11 @@ export interface Note {
   createdAt: number;
   updatedAt: number;
   tags: string[];
-  synced?: boolean;
-  isDeleted?: boolean; // Must be present
+  deleted?: boolean;
+  deletedAt?: number;
 }
 
-export type ViewMode = 'all' | 'trash'; // <--- UPDATED: New View Mode Type
+export type ViewMode = 'edit' | 'preview' | 'split';
 
 export interface AppSettings {
   autoSave: boolean;
