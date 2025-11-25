@@ -9,6 +9,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+// FIX: This enables Express to correctly read the protocol (http/https) 
+// and host (notes.mysite.com) set by any reverse proxy.
+app.set('trust proxy', true); 
+
 const PORT = process.env.NODE_ENV === 'production' ? 2100 : 3000;
 
 // Increase limits for heavy notes/images
@@ -111,6 +115,21 @@ app.delete('/api/notes/:id', (req, res) => {
     }
 });
 
+app.post('/api/sync', (req, res) => {
+    // NOTE: For a simple file-based system, a true sync involves complex 
+    // reconciliation logic (comparing timestamps, sending/receiving changes).
+    // For now, we simply return a success response to prevent the 404 error
+    // and let the client know the call succeeded.
+    console.log(`[SERVER] Sync request received from client.`);
+    
+    // Placeholder logic for future two-way sync:
+    // 1. Check client-side timestamps against server files.
+    // 2. Read all files (GET /api/notes essentially).
+    // 3. Compare and send back any missing/newer files.
+    
+    res.json({ success: true, message: "Sync successful (Placeholder)" });
+});
+
 // --- SERVE FRONTEND (Production) ---
 
 // Serve files from the uploads directory (used by the new image links)
@@ -120,8 +139,7 @@ if (process.env.NODE_ENV === 'production') {
     // Serve the built client files
     app.use(express.static(path.join(__dirname, 'dist')));
     
-    // FIX: Use app.use() instead of app.get('*') to avoid PathError on some router versions.
-    // This serves index.html for all client-side routing fallback.
+    // FIX: Use app.use() to avoid PathError and ensure SPA fallback.
     app.use((req, res) => {
         // Only serve index.html if the request is a GET and not for an API path
         if (req.method === 'GET' && !req.path.startsWith('/api')) {

@@ -5,12 +5,13 @@ FROM node:20-alpine
 # --- 1. USER SETUP ---
 # Create a dedicated non-root user and group
 ARG USER_NAME=appuser
-ARG USER_UID=21210
+# FIX: Use UID/GID 21000 for high security and conflict avoidance
+ARG USER_UID=21000 
 
-# FIX: Add this line to explicitly create the group first
+# FIX: Create the group first to resolve build error
 RUN addgroup -g ${USER_UID} ${USER_NAME}
 
-# Original line 9, now runs correctly as the group exists
+# Add the user using the new ID
 RUN adduser -u ${USER_UID} -D -G ${USER_NAME} ${USER_NAME}
 
 WORKDIR /app
@@ -29,7 +30,6 @@ COPY . .
 
 # --- 2. PERMISSIONS FIX ---
 # Change ownership of the app directory to the new non-root user
-# This allows the 'appuser' to read the node_modules and built files at runtime
 RUN chown -R ${USER_NAME}:${USER_NAME} /app
 
 # Fix permissions on the persistent data volume location to ensure writes work
