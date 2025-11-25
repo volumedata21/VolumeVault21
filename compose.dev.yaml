@@ -13,3 +13,4 @@ services:
       - VITE_API_KEY=${API_KEY}
       - NODE_ENV=development
     restart: unless-stopped
+    user: 501:20
