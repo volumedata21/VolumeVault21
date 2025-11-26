@@ -225,11 +225,17 @@ export default function App() {
       
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile Header */}
-        <div className="md:hidden flex items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+        {/* FIX: Add sticky/z-index to lock the header to the top of the viewport/container. 
+           We also ensure the background is opaque to cover scrolling content. */}
+        <div className="md:hidden sticky top-0 z-40 flex items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
           <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 mr-2 text-gray-600 dark:text-gray-400">
             <Menu size={24} />
           </button>
-          <span className="font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">VolumeVault21</span>
+          {/* FIX: Updated gradient colors to #DD3D2D and #F67E4B */}
+          <span className="font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r"
+                style={{backgroundImage: 'linear-gradient(to right, #DD3D2D, #F67E4B)'}}>
+            VolumeVault21
+          </span>
         </div>
         
         {loading ? (
