@@ -4,7 +4,7 @@ import { Editor } from './components/Editor';
 import { SettingsModal } from './components/SettingsModal';
 import { Note, AppSettings } from './types';
 import { noteService } from './services/noteService';
-import { Menu } from 'lucide-react';
+import { Menu, RefreshCw } from 'lucide-react';
 
 const DEFAULT_SETTINGS: AppSettings = {
   autoSave: true,
@@ -20,15 +20,20 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<'notes' | 'trash'>('notes');
-  const [loading, setLoading] = useState(true); // NEW: Loading state
+  const [loading, setLoading] = useState(true); 
+
+  // SWIPE/PULL STATE
+  const [touchStartX, setTouchStartX] = useState(0);
+  const [touchStartY, setTouchStartY] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
+  const MIN_SWIPE_DISTANCE = 60; 
+  const MIN_PULL_DISTANCE = 80; 
 
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
-      // Try new key
       let saved = localStorage.getItem(SETTINGS_KEY);
-      // Fallback to old key
       if (!saved) {
-          saved = localStorage.getItem(LEGACY_SETTINGS_KEY);
+          saved = localStorage.getItem(LEGACY_KEY);
           if (saved) {
              try {
                 localStorage.setItem(SETTINGS_KEY, saved);
@@ -42,31 +47,68 @@ export default function App() {
     }
   });
   
-  // NEW: Centralized function to load notes (called on mount and sync)
   const loadNotes = useCallback(async () => {
-    setLoading(true);
+    if (!loading) setLoading(true); 
     try {
         const loadedNotes = await noteService.getAllNotes();
         setNotes(loadedNotes);
-        // Only select a note if it's active
         const activeNotes = loadedNotes.filter(n => !n.deleted);
         if (activeNotes.length > 0 && !currentNoteId) {
           setCurrentNoteId(activeNotes[0].id);
         } else if (!currentNoteId && activeNotes.length > 0) {
-          // If a note was deleted, ensure a new active one is selected
           setCurrentNoteId(activeNotes[0].id);
         }
     } catch (e) {
         console.error("Failed to load notes from server/IDB.", e);
     } finally {
         setLoading(false);
+        setIsPulling(false);
     }
-  }, [currentNoteId]);
+  }, [currentNoteId, loading]);
 
-  // Load notes on mount (Async)
   useEffect(() => {
     loadNotes();
   }, [loadNotes]);
+
+  // Touch event handlers for swipe-to-open and pull-to-refresh
+  useEffect(() => {
+    const handleTouchStart = (e: TouchEvent) => {
+        setTouchStartX(e.touches[0].clientX);
+        setTouchStartY(e.touches[0].clientY);
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+        const touchEndX = e.changedTouches[0].clientX;
+        const touchEndY = e.changedTouches[0].clientY;
+        const swipeDistanceX = touchEndX - touchStartX;
+        const swipeDistanceY = touchEndY - touchStartY;
+        
+        // 1. Swipe-to-Open (Horizontal)
+        if (touchStartX < 50 && swipeDistanceX > MIN_SWIPE_DISTANCE && !isSidebarOpen && window.innerWidth < 768) {
+            setIsSidebarOpen(true);
+        }
+
+        // 2. Pull-to-Refresh (Vertical)
+        const editorContent = document.getElementById('main-editor-content');
+        if (editorContent && editorContent.scrollTop === 0 && swipeDistanceY > MIN_PULL_DISTANCE) {
+            if (Math.abs(swipeDistanceX) < 30) { 
+                setIsPulling(true);
+                loadNotes(); 
+            }
+        }
+        
+        setTouchStartX(0);
+        setTouchStartY(0);
+    };
+
+    window.addEventListener('touchstart', handleTouchStart);
+    window.addEventListener('touchend', handleTouchEnd);
+
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [isSidebarOpen, touchStartX, touchStartY, loadNotes]);
 
 
   // Filter notes based on current view
@@ -102,8 +144,7 @@ export default function App() {
   const saveCurrentNoteToDisk = async () => {
     if (currentNoteId) {
       const note = notes.find(n => n.id === currentNoteId);
-      if (note && !note.deleted) { // Don't auto-save trashed notes
-        // Note: saveNote now handles server pushing internally
+      if (note && !note.deleted) { 
         await noteService.saveNote(note);
       }
     }
@@ -114,7 +155,7 @@ export default function App() {
     const newNote = await noteService.createNote();
     setNotes(prev => [newNote, ...prev]);
     setCurrentNoteId(newNote.id);
-    setSidebarView('notes'); // Switch back to active view
+    setSidebarView('notes'); 
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
@@ -125,16 +166,13 @@ export default function App() {
   };
 
   const handleDeleteNote = async (id: string) => {
-    // Soft Delete (trashNote now handles server update)
     await noteService.trashNote(id);
     
     setNotes(prev => prev.map(n => 
         n.id === id ? { ...n, deleted: true, updatedAt: Date.now(), deletedAt: Date.now() } : n
     ));
 
-    // If deleting currently selected note, find a new one
     if (currentNoteId === id) {
-        // Find next active note
         const remaining = notes.filter(n => n.id !== id && !n.deleted);
         setCurrentNoteId(remaining.length > 0 ? remaining[0].id : null);
     }
@@ -146,7 +184,6 @@ export default function App() {
         n.id === id ? { ...n, deleted: false, updatedAt: Date.now(), deletedAt: undefined } : n
       ));
       
-      // UX Improvement: Switch to Notes view so user sees the restored note immediately
       if (sidebarView === 'trash') {
           setSidebarView('notes');
       }
@@ -163,7 +200,6 @@ export default function App() {
   const handleEmptyTrash = async () => {
       await noteService.emptyTrash();
       setNotes(prev => prev.filter(n => !n.deleted));
-      // If currently viewing a trashed note, clear selection
       const current = getCurrentNote();
       if (current && current.deleted) {
           setCurrentNoteId(null);
@@ -178,7 +214,6 @@ export default function App() {
       if (note.id === currentNoteId) {
         const updatedNote = { ...note, ...updates, updatedAt: Date.now() };
         
-        // If requested, save to disk (saveNote now handles server pushing internally)
         if (saveToDisk) {
              noteService.saveNote(updatedNote).catch(e => console.error("Failed to save to server/disk", e));
         }
@@ -190,8 +225,7 @@ export default function App() {
   };
 
   const handleManualSaveCurrent = () => {
-    // This function is kept for compatibility with Editor's API but is redundant
-    // as handleUpdateNoteState handles persistence.
+    // Retained for Editor compatibility
   };
 
   const handleExport = () => {
@@ -223,62 +257,73 @@ export default function App() {
         trashCount={trashCount}
       />
       
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Mobile Header */}
-        {/* FIX: Add sticky/z-index to lock the header to the top of the viewport/container. 
-           We also ensure the background is opaque to cover scrolling content. */}
-        <div className="md:hidden sticky top-0 z-40 flex items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      {/* Main Content Column */}
+      {/* IMPORTANT FIX: We rely entirely on flex-1 to define height, not explicit h-full/h-screen. */}
+      <div className="flex-1 flex flex-col min-w-0"> 
+        
+        {/* Mobile Header (Locked and Sticky) */}
+        <div className="md:hidden sticky top-0 z-40 flex items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md">
           <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 mr-2 text-gray-600 dark:text-gray-400">
             <Menu size={24} />
           </button>
-          {/* FIX: Updated gradient colors to #DD3D2D and #F67E4B */}
+          {/* Updated gradient colors */}
           <span className="font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r"
                 style={{backgroundImage: 'linear-gradient(to right, #DD3D2D, #F67E4B)'}}>
             VolumeVault21
           </span>
         </div>
         
-        {loading ? (
-             <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
+        {/* Main Editor/Loading Area - Scrollable Content Container */}
+        {/* The 'flex-1 overflow-y-auto' handles all the content scrolling below the sticky header. */}
+        <div id="main-editor-content" className="flex-1 overflow-y-auto relative">
+           
+           {/* Pull-to-Refresh Indicator (Visible when pulling or syncing) */}
+           <div className={`absolute top-0 left-0 right-0 h-10 flex items-center justify-center transition-opacity ${isPulling || loading ? 'opacity-100' : 'opacity-0'}`}>
+                <RefreshCw size={20} className="animate-spin text-blue-500" />
+           </div>
+
+           {loading && !isPulling ? ( 
+             <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400 h-full">
                 <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
                 Loading notes from server...
              </div>
-        ) : currentNoteId ? (
-           <Editor 
-             key={currentNoteId} // Critical: Forces re-mount when switching notes to prevent state ghosting
-             note={getCurrentNote()!} 
-             onChange={handleUpdateNoteState}
-             onSave={handleManualSaveCurrent}
-             settings={settings}
-             availableCategories={availableCategories}
-             onRestore={() => handleRestoreNote(currentNoteId)}
-             onDeleteForever={() => handlePermanentDelete(currentNoteId)}
-           />
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center">
-             <div className="max-w-md">
-                <h2 className="text-2xl font-bold text-gray-700 dark:text-gray-200 mb-4">
-                    {sidebarView === 'trash' ? 'Trash Bin' : 'Welcome to VolumeVault21'}
-                </h2>
-                <p className="mb-8">
-                    {sidebarView === 'trash' 
-                        ? 'Select a note to restore or delete it permanently.' 
-                        : 'Select a note from the sidebar or create a new one to get started.'}
-                </p>
-                {sidebarView === 'notes' && (
-                    <button 
-                    onClick={handleCreateNote}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-bold shadow-lg hover:bg-blue-700 transition-colors"
-                    >
-                    Create First Note
-                    </button>
-                )}
+           ) : currentNoteId ? (
+             <Editor 
+               key={currentNoteId} 
+               note={getCurrentNote()!} 
+               onChange={handleUpdateNoteState}
+               onSave={handleManualSaveCurrent}
+               settings={settings}
+               availableCategories={availableCategories}
+               onRestore={() => handleRestoreNote(currentNoteId)}
+               onDeleteForever={() => handlePermanentDelete(currentNoteId)}
+             />
+           ) : (
+             <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center h-full">
+                <div className="max-w-md">
+                   <h2 className="text-2xl font-bold text-gray-700 dark:text-gray-200 mb-4">
+                       {sidebarView === 'trash' ? 'Trash Bin' : 'Welcome to VolumeVault21'}
+                   </h2>
+                   <p className="mb-8">
+                       {sidebarView === 'trash' 
+                           ? 'Select a note to restore or delete it permanently.' 
+                           : 'Select a note from the sidebar or create a new one to get started.'}
+                   </p>
+                   {sidebarView === 'notes' && (
+                       <button 
+                       onClick={handleCreateNote}
+                       className="px-6 py-3 bg-blue-600 text-white rounded-lg font-bold shadow-lg hover:bg-blue-700 transition-colors"
+                       >
+                       Create First Note
+                       </button>
+                   )}
+                </div>
              </div>
-          </div>
-        )}
+           )}
+        </div>
       </div>
 
       <SettingsModal 
@@ -287,7 +332,7 @@ export default function App() {
         settings={settings}
         onUpdateSettings={handleUpdateSettings}
         onExport={handleExport}
-        onRefreshNotes={loadNotes} // Trigger server load after manual sync
+        onRefreshNotes={loadNotes} 
       />
     </div>
   );
