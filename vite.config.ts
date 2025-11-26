@@ -42,15 +42,16 @@ export default defineConfig({
     },
     // CRITICAL FIX: Proxy /api and /uploads traffic from Vite (2100) to Express (3000)
     proxy: {
+      // This routes both GET and POST requests for /api/* to the Express server
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        secure: false, // Ensure this isn't causing issues
+        secure: false, 
       },
+      // This ensures image links are fetched correctly
       '/uploads': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        secure: false, // Ensure this isn't causing issues
       }
     }
   }

@@ -1,10 +1,12 @@
+# --- Corrected compose.dev.yaml (Removing the user line) ---
 services:
   app:
     build: .
-    command: ["npm", "run", "dev"]
+    # Use sh -c to ensure the host-mounted node_modules has correct ownership for user 1000:1000
+    command: ["sh", "-c", "chown -R 21000:21000 /app/node_modules && npm run dev"]
     ports:
-      - "2100:2100" # Vite Dev Server (Frontend)
-      - "2101:3000" # API Server (Backend)
+      - "2100:2100"
+      - "2101:3000"
     volumes:
       - .:/app
       - /app/node_modules
@@ -13,4 +15,4 @@ services:
       - VITE_API_KEY=${API_KEY}
       - NODE_ENV=development
     restart: unless-stopped
-    user: 501:20
+    # REMOVED: user: 1000:1000 (Rely on Dockerfile to set USER appuser, which is UID 21000)
