@@ -47,28 +47,45 @@ export default function App() {
     }
   });
   
+  // CRITICAL FIX: The loading state is managed outside this callback to prevent loops.
   const loadNotes = useCallback(async () => {
+    // Only show spinner if not already pulling/loading
     if (!loading) setLoading(true); 
+    
     try {
         const loadedNotes = await noteService.getAllNotes();
         setNotes(loadedNotes);
         const activeNotes = loadedNotes.filter(n => !n.deleted);
-        if (activeNotes.length > 0 && !currentNoteId) {
+        
+        // Only set currentNoteId if it's null AND we have notes to select
+        if (!currentNoteId && activeNotes.length > 0) {
           setCurrentNoteId(activeNotes[0].id);
-        } else if (!currentNoteId && activeNotes.length > 0) {
-          setCurrentNoteId(activeNotes[0].id);
+        } else if (currentNoteId && !activeNotes.find(n => n.id === currentNoteId)) {
+          // If the current note was deleted/trashed on another device, select a new active one
+          setCurrentNoteId(activeNotes[0]?.id || null);
         }
+
     } catch (e) {
         console.error("Failed to load notes from server/IDB.", e);
     } finally {
         setLoading(false);
         setIsPulling(false);
     }
-  }, [currentNoteId, loading]);
+  }, [currentNoteId]); // Only depends on currentNoteId for selection logic
 
+  // CRITICAL FIX: Ensure loadNotes runs only on mount.
   useEffect(() => {
-    loadNotes();
-  }, [loadNotes]);
+    let isMounted = true;
+    
+    if (isMounted) {
+      loadNotes();
+    }
+    
+    return () => {
+      isMounted = false; // Cleanup function to prevent calling setNotes on unmounted component
+    };
+  }, [loadNotes]); // The dependency array uses loadNotes, which now only changes when currentNoteId changes.
+
 
   // Touch event handlers for swipe-to-open and pull-to-refresh
   useEffect(() => {
@@ -174,7 +191,7 @@ export default function App() {
 
     if (currentNoteId === id) {
         const remaining = notes.filter(n => n.id !== id && !n.deleted);
-        setCurrentNoteId(remaining.length > 0 ? remaining[0].id : null);
+        setCurrentNoteId(remaining[0]?.id || null);
     }
   };
 
@@ -258,7 +275,6 @@ export default function App() {
       />
       
       {/* Main Content Column */}
-      {/* IMPORTANT FIX: We rely entirely on flex-1 to define height, not explicit h-full/h-screen. */}
       <div className="flex-1 flex flex-col min-w-0"> 
         
         {/* Mobile Header (Locked and Sticky) */}
@@ -274,7 +290,6 @@ export default function App() {
         </div>
         
         {/* Main Editor/Loading Area - Scrollable Content Container */}
-        {/* The 'flex-1 overflow-y-auto' handles all the content scrolling below the sticky header. */}
         <div id="main-editor-content" className="flex-1 overflow-y-auto relative">
            
            {/* Pull-to-Refresh Indicator (Visible when pulling or syncing) */}
@@ -304,7 +319,7 @@ export default function App() {
            ) : (
              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center h-full">
                 <div className="max-w-md">
-                   <h2 className="text-2xl font-bold text-gray-700 dark:text-gray-200 mb-4">
+                   <h2 className="2xl font-bold text-gray-700 dark:text-gray-200 mb-4">
                        {sidebarView === 'trash' ? 'Trash Bin' : 'Welcome to VolumeVault21'}
                    </h2>
                    <p className="mb-8">
