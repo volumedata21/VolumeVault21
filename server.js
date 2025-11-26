@@ -9,8 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-// FIX: This enables Express to correctly read the protocol (http/https) 
-// and host (notes.mysite.com) set by any reverse proxy.
+// FIX: This enables Express to correctly read proxy headers (essential for remote access/sync).
 app.set('trust proxy', true); 
 
 const PORT = process.env.NODE_ENV === 'production' ? 2100 : 3000;
@@ -48,35 +47,75 @@ app.use((req, res, next) => {
 
 // --- API ROUTES ---
 
+// Helper function to fetch note metadata (used by both sync GET/POST handlers)
+const fetchNoteMetadata = () => {
+    const files = fs.readdirSync(NOTES_DIR);
+    return files
+        .filter(f => f.endsWith('.json'))
+        .map(file => {
+            try {
+                const noteData = JSON.parse(fs.readFileSync(path.join(NOTES_DIR, file), 'utf-8'));
+                return {
+                    id: noteData.id,
+                    updatedAt: noteData.updatedAt,
+                    deleted: noteData.deleted || false
+                };
+            } catch (e) {
+                console.error(`[SERVER] Corrupt file during sync metadata retrieval: ${file}`);
+                return null;
+            }
+        })
+        .filter(n => n !== null);
+};
+
+
 // 1. Upload Image
 app.post('/api/upload', upload.single('image'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     console.log(`[SERVER] Image uploaded: ${req.file.filename}`);
-    // Respond with a public URL that can be used in the Markdown content
     res.json({ url: `/uploads/${req.file.filename}` });
 });
 
-// 2. Save/Update/Soft-Delete Note
+// 2. Save/Update/Soft-Delete Note (WITH TIMESTAMP CONFLICT RESOLUTION)
 app.post('/api/notes', (req, res) => {
-    const note = req.body;
-    const filePath = path.join(NOTES_DIR, `${note.id}.json`);
+    const incomingNote = req.body;
+    const filePath = path.join(NOTES_DIR, `${incomingNote.id}.json`);
     
-    if (note.isDeleted) {
-        console.log(`[SERVER] 🗑️ Soft Deleting note: ${note.title || note.id}`);
+    if (fs.existsSync(filePath)) {
+        try {
+            const serverNote = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+            
+            // CONFLICT RESOLUTION: Last Write Wins (LWW)
+            if (incomingNote.updatedAt <= serverNote.updatedAt) {
+                console.log(`[SERVER] 🚫 Rejected older note: ${incomingNote.id}. Client timestamp (${incomingNote.updatedAt}) is older than server's (${serverNote.updatedAt}).`);
+                return res.status(200).json({ 
+                    success: true,
+                    status: 'rejected',
+                    message: 'Server has a newer version.',
+                    latestNote: serverNote
+                });
+            }
+        } catch (e) {
+            console.error(`[SERVER] Error reading existing file ${incomingNote.id}:`, e);
+        }
+    }
+
+    if (incomingNote.deleted) {
+        console.log(`[SERVER] 🗑️ Saving deleted status for note: ${incomingNote.title || incomingNote.id}`);
     } else {
-        console.log(`[SERVER] 💾 Saving note: ${note.title || note.id}`);
+        console.log(`[SERVER] 💾 Saving newest version of note: ${incomingNote.title || incomingNote.id}`);
     }
 
     try {
-        fs.writeFileSync(filePath, JSON.stringify(note, null, 2));
-        res.json({ success: true });
+        fs.writeFileSync(filePath, JSON.stringify(incomingNote, null, 2));
+        res.json({ success: true, status: 'accepted', latestNote: incomingNote });
     } catch (e) {
         console.error("[SERVER] Error writing file:", e);
         res.status(500).json({ error: "Write failed" });
     }
 });
 
-// 3. Get All Notes
+// 3. Get All Notes (Used for initial app load)
 app.get('/api/notes', (req, res) => {
     try {
         const files = fs.readdirSync(NOTES_DIR);
@@ -115,22 +154,32 @@ app.delete('/api/notes/:id', (req, res) => {
     }
 });
 
-app.post('/api/sync', (req, res) => {
-    // NOTE: For a simple file-based system, a true sync involves complex 
-    // reconciliation logic (comparing timestamps, sending/receiving changes).
-    // For now, we simply return a success response to prevent the 404 error
-    // and let the client know the call succeeded.
-    console.log(`[SERVER] Sync request received from client.`);
-    
-    // Placeholder logic for future two-way sync:
-    // 1. Check client-side timestamps against server files.
-    // 2. Read all files (GET /api/notes essentially).
-    // 3. Compare and send back any missing/newer files.
-    
-    res.json({ success: true, message: "Sync successful (Placeholder)" });
-});
+// 5. Synchronization Endpoint (Fixes 404 issue by routing POST requests)
+app.route('/api/sync')
+    .get((req, res) => {
+        try {
+            const metadata = fetchNoteMetadata();
+            console.log(`[SERVER] GET /api/sync. Serving metadata for ${metadata.length} notes.`);
+            res.json({ success: true, metadata: metadata, message: "Sync metadata retrieved." });
+        } catch (e) {
+            console.error("[SERVER] Failed GET sync request:", e);
+            res.status(500).json({ success: false, error: "Sync failed to retrieve data" });
+        }
+    })
+    .post((req, res) => {
+        // FIX: Route POST request to the GET logic, as client-side code is sending a POST request to initiate sync.
+        try {
+            const metadata = fetchNoteMetadata();
+            console.log(`[SERVER] POST /api/sync received. Serving metadata for ${metadata.length} notes.`);
+            res.json({ success: true, metadata: metadata, message: "Sync metadata retrieved." });
+        } catch (e) {
+            console.error("[SERVER] Failed POST sync request:", e);
+            res.status(500).json({ success: false, error: "Sync failed to retrieve data" });
+        }
+    });
 
-// --- SERVE FRONTEND (Production) ---
+
+// --- SERVE FRONTEND (Production/Development Fallback) ---
 
 // Serve files from the uploads directory (used by the new image links)
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -141,11 +190,9 @@ if (process.env.NODE_ENV === 'production') {
     
     // FIX: Use app.use() to avoid PathError and ensure SPA fallback.
     app.use((req, res) => {
-        // Only serve index.html if the request is a GET and not for an API path
         if (req.method === 'GET' && !req.path.startsWith('/api')) {
             res.sendFile(path.join(__dirname, 'dist', 'index.html'));
         } else {
-            // For unmatched API paths (POST/PUT/DELETE) return 404
             res.status(404).end();
         }
     });
