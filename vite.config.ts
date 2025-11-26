@@ -39,7 +39,7 @@ export default defineConfig({
     watch: {
         usePolling: true
     },
-    // CRITICAL FIX: This intercepts the POST /api/sync request
+    // CRITICAL FIX: Proxy /api and /uploads traffic from Vite (2100) to Express (3000)
     proxy: {
       '/api': {
         target: 'http://localhost:3000',

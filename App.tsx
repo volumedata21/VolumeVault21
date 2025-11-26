@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { SettingsModal } from './components/SettingsModal';
@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const SETTINGS_KEY = 'volumevault_settings';
-const LEGACY_SETTINGS_KEY = 'markmind_settings';
+const LEGACY_SETTINGS_KEY = 'markmind_notes_v1';
 
 export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -20,7 +20,8 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<'notes' | 'trash'>('notes');
-  
+  const [loading, setLoading] = useState(true); // NEW: Loading state
+
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       // Try new key
@@ -40,20 +41,33 @@ export default function App() {
       return DEFAULT_SETTINGS;
     }
   });
+  
+  // NEW: Centralized function to load notes (called on mount and sync)
+  const loadNotes = useCallback(async () => {
+    setLoading(true);
+    try {
+        const loadedNotes = await noteService.getAllNotes();
+        setNotes(loadedNotes);
+        // Only select a note if it's active
+        const activeNotes = loadedNotes.filter(n => !n.deleted);
+        if (activeNotes.length > 0 && !currentNoteId) {
+          setCurrentNoteId(activeNotes[0].id);
+        } else if (!currentNoteId && activeNotes.length > 0) {
+          // If a note was deleted, ensure a new active one is selected
+          setCurrentNoteId(activeNotes[0].id);
+        }
+    } catch (e) {
+        console.error("Failed to load notes from server/IDB.", e);
+    } finally {
+        setLoading(false);
+    }
+  }, [currentNoteId]);
 
   // Load notes on mount (Async)
   useEffect(() => {
-    const loadNotes = async () => {
-      const loadedNotes = await noteService.getAllNotes();
-      setNotes(loadedNotes);
-      // Only select a note if it's active
-      const activeNotes = loadedNotes.filter(n => !n.deleted);
-      if (activeNotes.length > 0 && !currentNoteId) {
-        setCurrentNoteId(activeNotes[0].id);
-      }
-    };
     loadNotes();
-  }, []);
+  }, [loadNotes]);
+
 
   // Filter notes based on current view
   const visibleNotes = useMemo(() => {
@@ -89,6 +103,7 @@ export default function App() {
     if (currentNoteId) {
       const note = notes.find(n => n.id === currentNoteId);
       if (note && !note.deleted) { // Don't auto-save trashed notes
+        // Note: saveNote now handles server pushing internally
         await noteService.saveNote(note);
       }
     }
@@ -110,7 +125,7 @@ export default function App() {
   };
 
   const handleDeleteNote = async (id: string) => {
-    // Soft Delete
+    // Soft Delete (trashNote now handles server update)
     await noteService.trashNote(id);
     
     setNotes(prev => prev.map(n => 
@@ -163,9 +178,9 @@ export default function App() {
       if (note.id === currentNoteId) {
         const updatedNote = { ...note, ...updates, updatedAt: Date.now() };
         
-        // If requested, save directly to disk using the FRESH state
+        // If requested, save to disk (saveNote now handles server pushing internally)
         if (saveToDisk) {
-             noteService.saveNote(updatedNote).catch(e => console.error("Failed to save to disk", e));
+             noteService.saveNote(updatedNote).catch(e => console.error("Failed to save to server/disk", e));
         }
         
         return updatedNote;
@@ -175,7 +190,8 @@ export default function App() {
   };
 
   const handleManualSaveCurrent = () => {
-    // Kept for compatibility, Editor handles saving mostly
+    // This function is kept for compatibility with Editor's API but is redundant
+    // as handleUpdateNoteState handles persistence.
   };
 
   const handleExport = () => {
@@ -215,8 +231,16 @@ export default function App() {
           </button>
           <span className="font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">VolumeVault21</span>
         </div>
-
-        {currentNoteId ? (
+        
+        {loading ? (
+             <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Loading notes from server...
+             </div>
+        ) : currentNoteId ? (
            <Editor 
              key={currentNoteId} // Critical: Forces re-mount when switching notes to prevent state ghosting
              note={getCurrentNote()!} 
@@ -257,6 +281,7 @@ export default function App() {
         settings={settings}
         onUpdateSettings={handleUpdateSettings}
         onExport={handleExport}
+        onRefreshNotes={loadNotes} // Trigger server load after manual sync
       />
     </div>
   );

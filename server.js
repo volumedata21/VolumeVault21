@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-// FIX: This enables Express to correctly read proxy headers (essential for remote access/sync).
+// CRITICAL: Enables Express to correctly read proxy headers for custom domains (e.g., notes.mysite.com)
 app.set('trust proxy', true); 
 
 const PORT = process.env.NODE_ENV === 'production' ? 2100 : 3000;
@@ -24,7 +24,7 @@ const DATA_DIR = '/data';
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const NOTES_DIR = path.join(DATA_DIR, 'notes');
 
-// Ensure directories exist
+// Ensure directories exist. Since running as root, this should not fail.
 [UPLOADS_DIR, NOTES_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
@@ -45,9 +45,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// --- API ROUTES ---
-
-// Helper function to fetch note metadata (used by both sync GET/POST handlers)
+// Helper function to fetch note metadata (used by sync GET/POST handlers)
 const fetchNoteMetadata = () => {
     const files = fs.readdirSync(NOTES_DIR);
     return files
@@ -68,6 +66,7 @@ const fetchNoteMetadata = () => {
         .filter(n => n !== null);
 };
 
+// --- API ROUTES ---
 
 // 1. Upload Image
 app.post('/api/upload', upload.single('image'), (req, res) => {
@@ -154,7 +153,8 @@ app.delete('/api/notes/:id', (req, res) => {
     }
 });
 
-// 5. Synchronization Endpoint (Fixes 404 issue by routing POST requests)
+// 5. Synchronization Endpoint (Required for client reconciliation)
+// NOTE: We define both GET and POST to handle client logic variations gracefully.
 app.route('/api/sync')
     .get((req, res) => {
         try {
@@ -167,8 +167,8 @@ app.route('/api/sync')
         }
     })
     .post((req, res) => {
-        // FIX: Route POST request to the GET logic, as client-side code is sending a POST request to initiate sync.
         try {
+            // Client sends a POST to initiate sync, so we respond with metadata.
             const metadata = fetchNoteMetadata();
             console.log(`[SERVER] POST /api/sync received. Serving metadata for ${metadata.length} notes.`);
             res.json({ success: true, metadata: metadata, message: "Sync metadata retrieved." });
