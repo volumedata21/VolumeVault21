@@ -22,18 +22,13 @@ export default function App() {
   const [sidebarView, setSidebarView] = useState<'notes' | 'trash'>('notes');
   const [loading, setLoading] = useState(true); 
 
-  // SWIPE/PULL STATE
-  const [touchStartX, setTouchStartX] = useState(0);
-  const [touchStartY, setTouchStartY] = useState(0);
-  const [isPulling, setIsPulling] = useState(false);
-  const MIN_SWIPE_DISTANCE = 60; 
-  const MIN_PULL_DISTANCE = 80; 
-
+  // REMOVED: SWIPE/PULL STATE
+  
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       let saved = localStorage.getItem(SETTINGS_KEY);
       if (!saved) {
-          saved = localStorage.getItem(LEGACY_KEY);
+          saved = localStorage.getItem(LEGACY_SETTINGS_KEY);
           if (saved) {
              try {
                 localStorage.setItem(SETTINGS_KEY, saved);
@@ -47,33 +42,28 @@ export default function App() {
     }
   });
   
-  // CRITICAL FIX: The loading state is managed outside this callback to prevent loops.
   const loadNotes = useCallback(async () => {
-    // Only show spinner if not already pulling/loading
-    if (!loading) setLoading(true); 
-    
+    setLoading(true); // Always set loading true when fetching
     try {
         const loadedNotes = await noteService.getAllNotes();
         setNotes(loadedNotes);
         const activeNotes = loadedNotes.filter(n => !n.deleted);
         
-        // Only set currentNoteId if it's null AND we have notes to select
-        if (!currentNoteId && activeNotes.length > 0) {
-          setCurrentNoteId(activeNotes[0].id);
-        } else if (currentNoteId && !activeNotes.find(n => n.id === currentNoteId)) {
-          // If the current note was deleted/trashed on another device, select a new active one
-          setCurrentNoteId(activeNotes[0]?.id || null);
-        }
+        // Stabilized selection logic
+        setCurrentNoteId(prevId => {
+             if (prevId && activeNotes.find(n => n.id === prevId)) {
+                 return prevId;
+             }
+             return activeNotes[0]?.id || null;
+        });
 
     } catch (e) {
         console.error("Failed to load notes from server/IDB.", e);
     } finally {
         setLoading(false);
-        setIsPulling(false);
     }
-  }, [currentNoteId]); // Only depends on currentNoteId for selection logic
+  }, []);
 
-  // CRITICAL FIX: Ensure loadNotes runs only on mount.
   useEffect(() => {
     let isMounted = true;
     
@@ -82,51 +72,9 @@ export default function App() {
     }
     
     return () => {
-      isMounted = false; // Cleanup function to prevent calling setNotes on unmounted component
+      isMounted = false;
     };
-  }, [loadNotes]); // The dependency array uses loadNotes, which now only changes when currentNoteId changes.
-
-
-  // Touch event handlers for swipe-to-open and pull-to-refresh
-  useEffect(() => {
-    const handleTouchStart = (e: TouchEvent) => {
-        setTouchStartX(e.touches[0].clientX);
-        setTouchStartY(e.touches[0].clientY);
-    };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-        const touchEndX = e.changedTouches[0].clientX;
-        const touchEndY = e.changedTouches[0].clientY;
-        const swipeDistanceX = touchEndX - touchStartX;
-        const swipeDistanceY = touchEndY - touchStartY;
-        
-        // 1. Swipe-to-Open (Horizontal)
-        if (touchStartX < 50 && swipeDistanceX > MIN_SWIPE_DISTANCE && !isSidebarOpen && window.innerWidth < 768) {
-            setIsSidebarOpen(true);
-        }
-
-        // 2. Pull-to-Refresh (Vertical)
-        const editorContent = document.getElementById('main-editor-content');
-        if (editorContent && editorContent.scrollTop === 0 && swipeDistanceY > MIN_PULL_DISTANCE) {
-            if (Math.abs(swipeDistanceX) < 30) { 
-                setIsPulling(true);
-                loadNotes(); 
-            }
-        }
-        
-        setTouchStartX(0);
-        setTouchStartY(0);
-    };
-
-    window.addEventListener('touchstart', handleTouchStart);
-    window.addEventListener('touchend', handleTouchEnd);
-
-    return () => {
-      window.removeEventListener('touchstart', handleTouchStart);
-      window.removeEventListener('touchend', handleTouchEnd);
-    };
-  }, [isSidebarOpen, touchStartX, touchStartY, loadNotes]);
-
+  }, [loadNotes]);
 
   // Filter notes based on current view
   const visibleNotes = useMemo(() => {
@@ -179,7 +127,7 @@ export default function App() {
   const handleNoteSelect = async (id: string) => {
     await saveCurrentNoteToDisk();
     setCurrentNoteId(id);
-    setIsSidebarOpen(false);
+    setIsSidebarOpen(false); // Close menu on select
   };
 
   const handleDeleteNote = async (id: string) => {
@@ -292,12 +240,15 @@ export default function App() {
         {/* Main Editor/Loading Area - Scrollable Content Container */}
         <div id="main-editor-content" className="flex-1 overflow-y-auto relative">
            
-           {/* Pull-to-Refresh Indicator (Visible when pulling or syncing) */}
-           <div className={`absolute top-0 left-0 right-0 h-10 flex items-center justify-center transition-opacity ${isPulling || loading ? 'opacity-100' : 'opacity-0'}`}>
-                <RefreshCw size={20} className="animate-spin text-blue-500" />
-           </div>
+           {/* FIX 1: Conditional Overlay for Mobile Sidebar Closure */}
+           {isSidebarOpen && (
+             <div 
+               className="fixed inset-0 z-20 md:hidden bg-black/50 backdrop-blur-sm"
+               onClick={() => setIsSidebarOpen(false)} // Closes the sidebar when overlay is clicked
+             ></div>
+           )}
 
-           {loading && !isPulling ? ( 
+           {loading ? ( 
              <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400 h-full">
                 <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -349,6 +300,17 @@ export default function App() {
         onExport={handleExport}
         onRefreshNotes={loadNotes} 
       />
+      
+      {/* FIX 2: Floating Mobile Sidebar Toggle (Safety Net) */}
+      <button
+        onClick={() => setIsSidebarOpen(true)}
+        className={`fixed bottom-4 left-4 z-20 md:hidden p-3 rounded-full bg-blue-600 shadow-xl text-white transition-opacity ${
+          isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        }`}
+        title="Open Menu"
+      >
+        <Menu size={20} />
+      </button>
     </div>
   );
 }
