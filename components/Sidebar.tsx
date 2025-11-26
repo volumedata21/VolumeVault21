@@ -80,7 +80,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     `}>
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
-        <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-500 dark:from-blue-400 dark:to-indigo-300 tracking-tight">
+        <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-500 dark:from-blue-400 dark:to-indigo-300 tracking-tight"
+            style={{backgroundImage: 'linear-gradient(to right, #DD3D2D, #F67E4B)'}}>
           {isTrash ? 'Trash Bin' : 'VolumeVault21'}
         </h1>
         <button onClick={onCloseMobile} className="md:hidden p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400">
