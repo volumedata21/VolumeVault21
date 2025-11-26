@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Note } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Note } from './types'; // Corrected import path
 import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon } from 'lucide-react';
 
 interface SidebarProps {
@@ -38,25 +38,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
 
-  const filteredNotes = notes
-    .filter((note) => {
-      const searchLower = searchTerm.toLowerCase();
-      return (
-        note.title.toLowerCase().includes(searchLower) || 
-        note.content.toLowerCase().includes(searchLower) ||
-        note.category.toLowerCase().includes(searchLower) ||
-        (note.tags && note.tags.some(tag => tag.toLowerCase().includes(searchLower)))
-      );
-    })
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const filteredNotes = useMemo(() => {
+    return notes
+      .filter((note) => {
+        const searchLower = searchTerm.toLowerCase();
+        return (
+          note.title.toLowerCase().includes(searchLower) || 
+          note.content.toLowerCase().includes(searchLower) ||
+          note.category.toLowerCase().includes(searchLower) ||
+          (note.tags && note.tags.some(tag => tag.toLowerCase().includes(searchLower)))
+        );
+      })
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [notes, searchTerm]);
 
   // Group by category
-  const groupedNotes = filteredNotes.reduce((acc, note) => {
-    const category = note.category || 'Uncategorized';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(note);
-    return acc;
-  }, {} as Record<string, Note[]>);
+  const groupedNotes = useMemo(() => {
+    return filteredNotes.reduce((acc, note) => {
+      const category = note.category || 'Uncategorized';
+      if (!acc[category]) acc[category] = [];
+      acc[category].push(note);
+      return acc;
+    }, {} as Record<string, Note[]>);
+  }, [filteredNotes]);
 
   const sortedCategories = Object.keys(groupedNotes).sort();
 
@@ -80,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     `}>
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
-        <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-500 dark:from-blue-400 dark:to-indigo-300 tracking-tight"
+        <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r"
             style={{backgroundImage: 'linear-gradient(to right, #DD3D2D, #F67E4B)'}}>
           {isTrash ? 'Trash Bin' : 'VolumeVault21'}
         </h1>
@@ -155,7 +159,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <button
                           onClick={() => {
                             onSelectNote(note.id);
-                            onCloseMobile();
+                            onCloseMobile(); 
                           }}
                           className={`w-full text-left p-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 group relative ${
                             currentNoteId === note.id 

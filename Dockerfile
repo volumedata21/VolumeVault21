@@ -4,29 +4,30 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
+# --- 1. Dependencies and Configuration Copy ---
 COPY package.json package-lock.json* ./
+COPY postcss.config.cjs ./ 
 
-# FIX: Delete the lockfile to force npm to download the correct Linux binaries
+# Delete the lockfile
 RUN rm -f package-lock.json
 
-# Install dependencies (legacy-peer-deps handles the React 19 conflict)
+# Install dependencies (This step includes installing tailwindcss into node_modules)
 RUN npm install --legacy-peer-deps
 
-# Copy source code
-COPY . .
+# --- 2. Source Code Copy and Build ---
+COPY . . 
 
-# FIX: Explicitly set CI=false so warnings don't get treated as errors
 ENV CI=false
 
 # --- PRODUCTION BUILD STEP ---
-# This compiles React into static files in the /dist folder
-RUN npm run build
+# CRITICAL FIX: Set NODE_PATH to explicitly point to node_modules ONLY for the build command.
+# This ensures PostCSS and Vite can find 'tailwindcss' within the container's environment.
+RUN NODE_PATH=/app/node_modules npm run build
 
 # Expose the production port
 EXPOSE 2100
 
-# Set environment to production (Tells server.js to serve /dist)
+# Set environment to production
 ENV NODE_ENV=production
 
 # Default Command: Run the Node.js backend
