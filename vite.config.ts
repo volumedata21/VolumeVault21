@@ -7,7 +7,6 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      // Include the new PWA assets
       includeAssets: ['pwa-512x512.png', 'pwa-192x192.png'], 
       manifest: {
         name: 'VolumeVault21',
@@ -42,13 +41,11 @@ export default defineConfig({
     },
     // CRITICAL FIX: Proxy /api and /uploads traffic from Vite (2100) to Express (3000)
     proxy: {
-      // This routes both GET and POST requests for /api/* to the Express server
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
         secure: false, 
       },
-      // This ensures image links are fetched correctly
       '/uploads': {
         target: 'http://localhost:3000',
         changeOrigin: true,
