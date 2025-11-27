@@ -22,8 +22,13 @@ export default function App() {
   const [sidebarView, setSidebarView] = useState<'notes' | 'trash'>('notes');
   const [loading, setLoading] = useState(true); 
 
-  // REMOVED: SWIPE/PULL STATE
-  
+  // NEW: Touch state for mobile gestures
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchEndX, setTouchEndX] = useState<number | null>(null);
+
+  const SETTINGS_KEY = 'volumevault_settings';
+  const LEGACY_SETTINGS_KEY = 'markmind_notes_v1';
+
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       let saved = localStorage.getItem(SETTINGS_KEY);
@@ -202,6 +207,45 @@ export default function App() {
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
   };
+  
+  // =======================================================
+  // NEW: MOBILE SWIPE HANDLERS
+  // =======================================================
+  const MIN_SWIPE_DISTANCE = 50; // Minimum pixels to count as a swipe
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // Only capture touch on mobile screens
+    if (window.innerWidth >= 768) return;
+    setTouchStartX(e.targetTouches[0].clientX);
+    setTouchEndX(null); // Reset end coordinate on start
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (window.innerWidth >= 768 || touchStartX === null) return;
+    setTouchEndX(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchEnd = () => {
+    if (window.innerWidth >= 768 || touchStartX === null || touchEndX === null) return;
+
+    const diff = touchStartX - touchEndX; // Negative diff means swipe right (open)
+    const absDiff = Math.abs(diff);
+
+    if (absDiff > MIN_SWIPE_DISTANCE) {
+      if (!isSidebarOpen && diff < 0 && touchStartX < 50) {
+        // Swiping right from near the left edge to OPEN
+        setIsSidebarOpen(true);
+      } else if (isSidebarOpen && diff > 0) {
+        // Swiping left to CLOSE (from within sidebar/main content)
+        setIsSidebarOpen(false);
+      }
+    }
+    
+    // Reset touch state
+    setTouchStartX(null);
+    setTouchEndX(null);
+  };
+  // =======================================================
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -222,8 +266,13 @@ export default function App() {
         trashCount={trashCount}
       />
       
-      {/* Main Content Column */}
-      <div className="flex-1 flex flex-col min-w-0"> 
+      {/* Main Content Column - HANDLERS APPLIED HERE */}
+      <div 
+        className="flex-1 flex flex-col min-w-0"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      > 
         
         {/* Mobile Header (Locked and Sticky) */}
         <div className="md:hidden sticky top-0 z-40 flex items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md">
@@ -301,16 +350,7 @@ export default function App() {
         onRefreshNotes={loadNotes} 
       />
       
-      {/* FIX 2: Floating Mobile Sidebar Toggle (Safety Net) */}
-      <button
-        onClick={() => setIsSidebarOpen(true)}
-        className={`fixed bottom-4 left-4 z-20 md:hidden p-3 rounded-full bg-blue-600 shadow-xl text-white transition-opacity ${
-          isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
-        }`}
-        title="Open Menu"
-      >
-        <Menu size={20} />
-      </button>
+      {/* REMOVED: Floating Mobile Sidebar Toggle (Fix 2: Replaced by swipe gesture) */}
     </div>
   );
 }
