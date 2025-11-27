@@ -12,6 +12,7 @@ const app = express();
 // CRITICAL: Enables Express to correctly read proxy headers for custom domains (e.g., notes.mysite.com)
 app.set('trust proxy', true); 
 
+// The Dockerfile EXPOSEs 2100. In prod, Express should listen on 2100 internally.
 const PORT = process.env.NODE_ENV === 'production' ? 2100 : 3000;
 
 // Increase limits for heavy notes/images
@@ -185,15 +186,18 @@ app.route('/api/sync')
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 if (process.env.NODE_ENV === 'production') {
-    // Serve the built client files
+    // 1. Serve the built client files (like JS, CSS, PWA assets)
     app.use(express.static(path.join(__dirname, 'dist')));
     
-    // FIX: Use app.use() to avoid PathError and ensure SPA fallback.
-    app.use((req, res) => {
-        if (req.method === 'GET' && !req.path.startsWith('/api')) {
-            res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    // 2. SPA Fallback: For any GET request that didn't match a static file or an API route, serve index.html
+    // This handles deep links and client-side routing.
+    app.get('*', (req, res) => {
+        // Ensure we don't accidentally intercept non-API requests like /uploads or favicon.
+        if (!req.path.startsWith('/api') && req.method === 'GET') {
+             res.sendFile(path.join(__dirname, 'dist', 'index.html'));
         } else {
-            res.status(404).end();
+             // For POST/PUT/DELETE/etc. requests that fall through, respond with 404 (optional)
+             res.status(404).end();
         }
     });
 }

@@ -9,7 +9,7 @@ interface SettingsModalProps {
   settings: AppSettings;
   onUpdateSettings: (settings: AppSettings) => void;
   onExport: () => void;
-  onRefreshNotes: () => Promise<void>; // Added from App.tsx logic for a full refresh
+  onRefreshNotes: () => Promise<void>; 
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -19,6 +19,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   onExport
 }) => {
+  // Use local state to manage input changes before committing to app settings
+  const [localServerUrl, setLocalServerUrl] = useState(settings.serverUrl || '');
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string>('');
 
@@ -28,13 +31,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsSyncing(true);
     setSyncStatus('Syncing...');
     try {
-        // FIX: Removed serverApiKey from the syncNotes call
-        await noteService.syncNotes(settings.serverUrl); 
+        // Save the current URL to app settings immediately before sync
+        onUpdateSettings({ ...settings, serverUrl: localServerUrl.trim() });
+
+        // Use the localServerUrl for sync
+        await noteService.syncNotes(localServerUrl.trim()); 
         setSyncStatus('Sync complete!');
-        
-        // Trigger a full note refresh in App.tsx (via onRefreshNotes) to update the UI after sync
-        // NOTE: Although noteService.syncNotes calls getAllNotes, sometimes React state update is needed.
-        // If onRefreshNotes prop is not available here, we'd rely solely on noteService.getAllNotes to do the job.
         
         setTimeout(() => setSyncStatus(''), 3000);
     } catch (e) {
@@ -42,6 +44,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } finally {
         setIsSyncing(false);
     }
+  };
+
+  // Handler to manually save the URL when the user hits 'Done' or the close button
+  const handleCloseAndSave = () => {
+      onUpdateSettings({ ...settings, serverUrl: localServerUrl.trim() });
+      onClose();
   };
 
   return (
@@ -52,7 +60,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             Settings
           </h2>
           <button
-            onClick={onClose}
+            onClick={handleCloseAndSave} // Use updated save handler
             className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
           >
             <X size={20} />
@@ -60,7 +68,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
         
         <div className="p-6 space-y-8 overflow-y-auto">
-          {/* Persistence Section */}
+          {/* Persistence Section (Unchanged) */}
           <div className="space-y-4">
             <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               Saving & Persistence
@@ -124,11 +132,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Sync Section */}
+          {/* Sync Section - ADDED SERVER URL INPUT */}
           <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
             <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               Server Sync
             </h3>
+            
+            {/* NEW: Server URL Input */}
+            <div>
+                <label htmlFor="serverUrl" className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1 block">
+                    Backend URL
+                </label>
+                <input
+                    id="serverUrl"
+                    type="url"
+                    value={localServerUrl}
+                    onChange={(e) => setLocalServerUrl(e.target.value)}
+                    placeholder="e.g., https://api.notes.com or http://192.168.1.100:3000"
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500"
+                />
+                 <p className="text-xs text-gray-500 mt-1">
+                    Enter the full URL of your backend API server. Leave empty if using the local proxy or reverse proxy.
+                </p>
+            </div>
+
 
             <div className="flex items-start gap-4">
                 <div className="pt-2">
@@ -138,9 +165,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
                 <div className="flex-1 space-y-3">
                     <div>
-                        <h4 className="font-semibold text-gray-900 dark:text-gray-100">Backend Connection</h4>
+                        <h4 className="font-semibold text-gray-900 dark:text-gray-100">Sync Notes</h4>
                         <p className="text-xs text-gray-500 mt-1">
-                            Sync notes with the configured backend database.
+                            Sync local notes with the configured backend database.
                         </p>
                     </div>
 
@@ -166,7 +193,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex justify-end flex-shrink-0">
           <button
-            onClick={onClose}
+            onClick={handleCloseAndSave} // Use updated save handler
             className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-bold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600"
           >
             Done

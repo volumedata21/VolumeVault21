@@ -1,5 +1,3 @@
-# Dockerfile
-
 FROM node:20-alpine
 
 WORKDIR /app
@@ -20,7 +18,7 @@ COPY . .
 ENV CI=false
 
 # --- PRODUCTION BUILD STEP ---
-# CRITICAL FIX: Set NODE_PATH to explicitly point to node_modules ONLY for the build command.
+# Set NODE_PATH to explicitly point to node_modules ONLY for the build command.
 # This ensures PostCSS and Vite can find 'tailwindcss' within the container's environment.
 RUN NODE_PATH=/app/node_modules npm run build
 

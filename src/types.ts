@@ -16,5 +16,4 @@ export interface AppSettings {
   autoSave: boolean;
   saveInterval: number; // in milliseconds
   serverUrl?: string;
-  // REMOVED: serverApiKey?: string;
 }
