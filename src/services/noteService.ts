@@ -6,9 +6,24 @@ import { get, set, values, del, clear } from 'idb-keyval';
 const STORAGE_KEY = 'volumevault_notes_v1';
 const LEGACY_KEY = 'markmind_notes_v1';
 
+// Helper to construct the full URL, defaulting to local proxy
+const getFullApiUrl = (endpoint: string, serverUrl?: string): string => {
+    // Fallback to relative path if serverUrl is not set (e.g., local dev environment)
+    if (!serverUrl || serverUrl.trim() === '') {
+        return endpoint; 
+    }
+    // Ensure the URL is correctly joined
+    const base = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
+    const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    return `${base}${path}`;
+};
+
+
 // Helper to push a single note to the server (using the LWW endpoint)
-const saveToServer = async (note: Note) => {
-    const response = await fetch('/api/notes', { // Use relative path /api/notes
+const saveToServer = async (note: Note, serverUrl?: string) => {
+    const url = getFullApiUrl('api/notes', serverUrl);
+    
+    const response = await fetch(url, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(note)
@@ -20,8 +35,10 @@ const saveToServer = async (note: Note) => {
 };
 
 // Helper to fetch all notes from the server
-const fetchAllNotesFromServer = async (): Promise<Note[]> => {
-    const response = await fetch('/api/notes', {
+const fetchAllNotesFromServer = async (serverUrl?: string): Promise<Note[]> => {
+    const url = getFullApiUrl('api/notes', serverUrl);
+
+    const response = await fetch(url, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
     });
@@ -33,33 +50,40 @@ const fetchAllNotesFromServer = async (): Promise<Note[]> => {
 
 
 export const noteService = {
-  getAllNotes: async (): Promise<Note[]> => {
+  getAllNotes: async (serverUrl?: string): Promise<Note[]> => {
     let notes: Note[] = [];
-    
+    let serverLoadSuccessful = false;
+
     try {
         // CRITICAL FIX: 1. Try to fetch all notes from the central server first.
-        notes = await fetchAllNotesFromServer();
-        console.log(`[SYNC] Successfully loaded ${notes.length} notes from server.`);
+        const serverNotes = await fetchAllNotesFromServer(serverUrl);
+        console.log(`[SYNC] Successfully loaded ${serverNotes.length} notes from server.`);
         
-        // 2. Overwrite local storage (IndexedDB) with the authoritative server data
-        await clear(); // Wipe local cache
-        await Promise.all(notes.map(n => set(n.id, n)));
-        console.log(`[SYNC] IndexedDB overwritten with server data.`);
+        // Use server notes as the base
+        notes = serverNotes; 
+        serverLoadSuccessful = true;
 
     } catch (e) {
         // If server fails (e.g., 404/Network), fall back to local IndexedDB
         console.warn("[SYNC] Server load failed. Falling back to local IndexedDB.", e);
-        notes = (await values()) || [];
     }
     
+    // Fallback/Update Logic
+    if (!serverLoadSuccessful) {
+        // If server failed, load notes from the local IndexedDB
+        notes = (await values()) || [];
+    } else {
+        // FIX IMPLEMENTED HERE: If server succeeded, wipe and overwrite IDB with server data.
+        await clear(); // Clear old local data
+        await Promise.all(notes.map(n => set(n.id, n)));
+        console.log(`[SYNC] IndexedDB overwritten with server data.`);
+    }
+
     // 3. Check for legacy LocalStorage data (only runs if server/IDB was empty)
     const legacyData = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_KEY);
     
     if (legacyData) {
         console.log("Legacy LocalStorage data detected. Processing...");
-        // This migration logic is complex and relies on local storage being the only source.
-        // For simplicity and stability, we skip the migration, assuming the server has the source.
-        
         // Clear LocalStorage to free quota after server read attempts have finished
         try {
             localStorage.removeItem(STORAGE_KEY);
@@ -192,21 +216,21 @@ export const noteService = {
     }
   },
 
-  syncNotes: async (serverUrl: string | undefined, apiKey: string | undefined): Promise<void> => {
+  syncNotes: async (serverUrl: string | undefined): Promise<void> => {
       // This is now the Full Reconciliation Trigger
       
       try {
           // 1. Send all local changes to the server (Outbound Sync)
-          const localNotes = await noteService.getAllNotes();
-          const syncPromises = localNotes.map(note => saveToServer(note).catch(e => {
-              console.error(`Failed to push note ${note.id} during sync.`, e);
+          const localNotes = (await values()) || []; 
+          const syncPromises = localNotes.map(note => 
+            saveToServer(note, serverUrl).catch(e => {
+                console.error(`Failed to push note ${note.id} during sync.`, e);
           }));
           await Promise.all(syncPromises);
 
           // 2. Pull down all server changes (Inbound Sync)
-          // Since getAllNotes() now prioritizes the server, we just call it and force a UI update
-          // The application's main load function handles the final state update.
           console.log("[SYNC] Outbound push complete. Triggering full inbound refresh...");
+          await noteService.getAllNotes(serverUrl); 
           
       } catch (e) {
           console.error("Failed to execute full sync process.", e);

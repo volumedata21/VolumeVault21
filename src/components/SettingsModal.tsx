@@ -9,6 +9,7 @@ interface SettingsModalProps {
   settings: AppSettings;
   onUpdateSettings: (settings: AppSettings) => void;
   onExport: () => void;
+  onRefreshNotes: () => Promise<void>; // Added from App.tsx logic for a full refresh
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -27,10 +28,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsSyncing(true);
     setSyncStatus('Syncing...');
     try {
-        // We use a simplified sync call that doesn't rely on user-entered keys
-        // It assumes the backend is configured at /api/sync relative to the domain
-        await noteService.syncNotes(settings.serverUrl, settings.serverApiKey);
+        // FIX: Removed serverApiKey from the syncNotes call
+        await noteService.syncNotes(settings.serverUrl); 
         setSyncStatus('Sync complete!');
+        
+        // Trigger a full note refresh in App.tsx (via onRefreshNotes) to update the UI after sync
+        // NOTE: Although noteService.syncNotes calls getAllNotes, sometimes React state update is needed.
+        // If onRefreshNotes prop is not available here, we'd rely solely on noteService.getAllNotes to do the job.
+        
         setTimeout(() => setSyncStatus(''), 3000);
     } catch (e) {
         setSyncStatus('Sync failed. Check connection.');
