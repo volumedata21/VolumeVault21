@@ -3,7 +3,9 @@ import { Note, AppSettings } from '../types';
 import {
     Save, Check, Bold, Italic, Underline, Strikethrough, Heading1, Heading2,
     List, ListOrdered, Code, Quote, Tag, AlertOctagon,
-    FileCode, Eye, CheckSquare, Image as ImageIcon, Lock, X, Trash2, RotateCcw
+    FileCode, Eye, CheckSquare, Image as ImageIcon, Lock, X, Trash2, RotateCcw,
+    // NEW: Added icon for Line Break
+    CornerDownLeft 
 } from 'lucide-react';
 // @ts-ignore
 import { marked } from 'marked';
@@ -70,6 +72,9 @@ export const Editor: React.FC<EditorProps> = ({
     const [tagInput, setTagInput] = useState('');
 
     const [isDirty, setIsDirty] = useState(false);
+    // Track content focus for mobile header collapse
+    const [isContentFocused, setIsContentFocused] = useState(false);
+    
     // Default to 'edit' as 'preview' (Markdown mode) is now disabled/removed
     const [viewMode, setViewMode] = useState<'edit' | 'preview' | 'readOnly'>('edit');
     const [editorContent, setEditorContent] = useState('');
@@ -117,6 +122,7 @@ export const Editor: React.FC<EditorProps> = ({
         setCategory(note.category || 'General');
         setTags(note.tags || []);
         setIsDirty(false);
+        setIsContentFocused(false); // Reset focus state on note change
 
         const html = marked.parse(note.content) as string;
         setEditorContent(viewMode === 'preview' ? note.content : html);
@@ -280,8 +286,14 @@ export const Editor: React.FC<EditorProps> = ({
         if (contentEditableRef.current) {
             contentEditableRef.current.focus();
         }
-        document.execCommand(command, false, value);
-
+        
+        // Handle specific line break command
+        if (command === 'insertLineBreak') {
+            document.execCommand('insertHTML', false, '<br>');
+        } else {
+            document.execCommand(command, false, value);
+        }
+        
         if (command === 'formatBlock' && (value === '<pre>' || value === 'blockquote')) {
             const selection = window.getSelection();
             if (selection && selection.rangeCount > 0) {
@@ -670,6 +682,12 @@ export const Editor: React.FC<EditorProps> = ({
 
     const handleContentFocus = () => {
         if (!contentEditableRef.current) return;
+        
+        // Set focus state on mobile
+        if (window.innerWidth < 768) { 
+            setIsContentFocused(true);
+        }
+        
         const text = contentEditableRef.current.innerText || '';
         if (text.includes('New Note') && text.includes('Start writing here')) {
             contentEditableRef.current.innerHTML = '<p><br></p>';
@@ -679,6 +697,12 @@ export const Editor: React.FC<EditorProps> = ({
 
     const handleContentBlur = () => {
         if (!contentEditableRef.current) return;
+        
+        // Unset focus state on mobile
+        if (window.innerWidth < 768) { 
+            setIsContentFocused(false);
+        }
+        
         const text = contentEditableRef.current.innerText?.trim();
         const hasMedia = contentEditableRef.current.querySelector('img, iframe, video, hr, table');
 
@@ -702,6 +726,9 @@ export const Editor: React.FC<EditorProps> = ({
         const text = contentEditableRef.current?.innerText?.trim() || '';
         return text.includes('New Note') && text.includes('Start writing here');
     }, [editorContent, note.content]);
+    
+    // Condition to hide the ENTIRE header when focused on mobile
+    const isMobileAndFocused = window.innerWidth < 768 && isContentFocused;
 
     const toolbarBtnClass = "p-2 text-gray-700 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors";
 
@@ -741,8 +768,8 @@ export const Editor: React.FC<EditorProps> = ({
                 </div>
             )}
 
-            {/* HEADER */}
-            <div className={`flex flex-col gap-4 p-4 border-b border-gray-200 dark:border-gray-800 ${isTrashed ? 'opacity-50 pointer-events-none' : ''}`}>
+            {/* HEADER - Collapsible on Mobile Focus */}
+            <div className={`flex flex-col gap-4 p-4 border-b border-gray-200 dark:border-gray-800 ${isTrashed ? 'opacity-50 pointer-events-none' : ''} ${isMobileAndFocused ? 'hidden md:flex' : ''}`}>
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                     <div className="flex-1 min-w-0 space-y-2">
                         <input
@@ -757,7 +784,7 @@ export const Editor: React.FC<EditorProps> = ({
                             placeholder="Untitled Note"
                         />
 
-                        {/* TAGS */}
+                        {/* TAGS - HIDDEN IN FOCUS MODE */}
                         <div className="flex flex-wrap items-center gap-2">
                             <Tag size={14} className="text-gray-400" />
                             {tags.map(tag => (
@@ -785,19 +812,21 @@ export const Editor: React.FC<EditorProps> = ({
 
                     {!isTrashed && (
                         <div className="flex items-center gap-2 flex-shrink-0">
+                            {/* SAVE BUTTON */}
                             <button
                                 onClick={handleManualSave}
                                 className={`
-                            flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all
-                            ${isDirty
-                                        ? 'bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-800 hover:to-indigo-700 text-white shadow-sm'
-                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                                    }
-                        `}
+                                flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all
+                                ${isDirty
+                                    ? 'bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-800 hover:to-indigo-700 text-white shadow-sm'
+                                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                                }
+                                `}
                             >
                                 {isDirty ? <Save size={16} /> : <Check size={16} />}
                             </button>
-
+                            
+                            {/* VIEW MODE TOGGLES */}
                             <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-lg flex items-center">
                                 <button
                                     onClick={() => toggleViewMode('edit')}
@@ -826,7 +855,7 @@ export const Editor: React.FC<EditorProps> = ({
                     )}
                 </div>
 
-                {/* Category Picker (Only visible in edit mode) */}
+                {/* Category Picker (Only visible in edit mode) - HIDDEN IN FOCUS MODE */}
                 {viewMode === 'edit' && !isTrashed && (
                     <div className="flex items-center gap-2">
                         <div className="relative group flex items-center">
@@ -853,9 +882,9 @@ export const Editor: React.FC<EditorProps> = ({
                 )}
             </div>
 
-            {/* TOOLBAR */}
+            {/* TOOLBAR - Scrollable on Mobile, Always Visible */}
             {viewMode === 'edit' && !isTrashed && (
-                <div className="flex flex-wrap items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 overflow-x-auto">
+                <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 overflow-x-auto whitespace-nowrap">
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('bold')} title="Bold (Ctrl+B)"><Bold size={18} /></button>
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('italic')} title="Italic (Ctrl+I)"><Italic size={18} /></button>
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('underline')} title="Underline (Ctrl+U)"><Underline size={18} /></button>
@@ -870,6 +899,7 @@ export const Editor: React.FC<EditorProps> = ({
                     <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', 'blockquote')}><Quote size={18} /></button>
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<pre>')}><Code size={18} /></button>
+                    <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('insertLineBreak')} title="Insert Line Break"><CornerDownLeft size={18} /></button>
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => {
                         const sel = window.getSelection();
                         if (sel && sel.rangeCount > 0) savedSelection.current = sel.getRangeAt(0);
