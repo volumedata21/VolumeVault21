@@ -55,7 +55,7 @@ export const noteService = {
     let serverLoadSuccessful = false;
 
     try {
-        // CRITICAL FIX: 1. Try to fetch all notes from the central server first.
+        // CRITICAL: Pass serverUrl to the network fetch helper
         const serverNotes = await fetchAllNotesFromServer(serverUrl);
         console.log(`[SYNC] Successfully loaded ${serverNotes.length} notes from server.`);
         
@@ -73,13 +73,13 @@ export const noteService = {
         // If server failed, load notes from the local IndexedDB
         notes = (await values()) || [];
     } else {
-        // FIX IMPLEMENTED HERE: If server succeeded, wipe and overwrite IDB with server data.
+        // FIX: If server succeeded, wipe and overwrite IDB with server data.
         await clear(); // Clear old local data
         await Promise.all(notes.map(n => set(n.id, n)));
         console.log(`[SYNC] IndexedDB overwritten with server data.`);
     }
 
-    // 3. Check for legacy LocalStorage data (only runs if server/IDB was empty)
+    // 3. Check for legacy LocalStorage data (cleanup remains)
     const legacyData = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_KEY);
     
     if (legacyData) {
@@ -101,9 +101,12 @@ export const noteService = {
   saveNote: async (note: Note): Promise<Note> => {
     const updatedNote = { ...note, updatedAt: Date.now() };
     
+    // NOTE: saveToServer does not accept serverUrl here as it's meant for quick local saves
+    // The App component must ensure the current note has the latest serverUrl saved to its state 
+    // before calling this (or rely on sync to push the update). We leave this simple for local speed.
     try {
-        // CRITICAL FIX: 1. PUSH to server first (triggers LWW comparison)
-        const serverResponse = await saveToServer(updatedNote);
+        // 1. PUSH to server first (triggers LWW comparison)
+        const serverResponse = await saveToServer(updatedNote); 
         
         // Use the accepted note (from server response) for local storage.
         const acceptedNote = serverResponse.latestNote || updatedNote;
@@ -139,6 +142,7 @@ export const noteService = {
     await set(newNote.id, newNote);
     
     // Attempt asynchronous save to server (not critical path, but preferred)
+    // NOTE: This relies on the default relative path.
     saveToServer(newNote).catch(e => console.error("Failed async server save for new note", e));
 
     return newNote;
@@ -156,7 +160,7 @@ export const noteService = {
       };
       // 1. Save locally
       await set(id, updated);
-      // 2. Save server status asynchronously
+      // 2. Save server status asynchronously (relies on default relative path)
       saveToServer(updated).catch(e => console.error("Failed async server trash update", e));
     }
   },
@@ -173,7 +177,7 @@ export const noteService = {
       };
       // 1. Save locally
       await set(id, updated);
-      // 2. Save server status asynchronously
+      // 2. Save server status asynchronously (relies on default relative path)
       saveToServer(updated).catch(e => console.error("Failed async server restore update", e));
     }
   },
@@ -181,16 +185,12 @@ export const noteService = {
   // Hard delete
   permanentlyDeleteNote: async (id: string): Promise<void> => {
     await del(id);
-    // NOTE: This does not delete the file from the server's /data volume, but subsequent 
-    // full sync will eventually remove the note from the client's local store.
-    // A proper permanent delete would require DELETE /api/notes/:id, but for now we focus on sync.
   },
 
   emptyTrash: async (): Promise<void> => {
     const notes: Note[] = (await values()) || [];
     const trashIds = notes.filter(n => n.deleted).map(n => n.id);
     for (const id of trashIds) {
-      // NOTE: We only delete locally; server reconciliation will handle the rest.
       await del(id);
     }
   },
@@ -206,7 +206,6 @@ export const noteService = {
             deleted: n.deleted || false
         }));
         
-        // This bypasses the server, but is assumed acceptable for an explicit import operation.
         await Promise.all(validNotes.map(n => set(n.id, n)));
         return true;
       }
@@ -216,13 +215,13 @@ export const noteService = {
     }
   },
 
+  // CRITICAL: Use the configured serverUrl for the full sync operation
   syncNotes: async (serverUrl: string | undefined): Promise<void> => {
-      // This is now the Full Reconciliation Trigger
-      
+      // 1. Send all local notes to the server (Outbound Sync)
       try {
-          // 1. Send all local changes to the server (Outbound Sync)
           const localNotes = (await values()) || []; 
           const syncPromises = localNotes.map(note => 
+            // Pass the URL to saveToServer for explicit remote push
             saveToServer(note, serverUrl).catch(e => {
                 console.error(`Failed to push note ${note.id} during sync.`, e);
           }));
@@ -230,6 +229,7 @@ export const noteService = {
 
           // 2. Pull down all server changes (Inbound Sync)
           console.log("[SYNC] Outbound push complete. Triggering full inbound refresh...");
+          // Pass the URL to getAllNotes to fetch from the remote source
           await noteService.getAllNotes(serverUrl); 
           
       } catch (e) {

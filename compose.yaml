@@ -1,5 +1,4 @@
 name: volumevault21
-
 services:
   app:
     image: volumedata21/volumevault21:latest
