@@ -4,8 +4,7 @@ import {
     Save, Check, Bold, Italic, Underline, Strikethrough, Heading1, Heading2,
     List, ListOrdered, Code, Quote, Tag, AlertOctagon,
     FileCode, Eye, CheckSquare, Image as ImageIcon, Lock, X, Trash2, RotateCcw,
-    // NEW: Added icon for Line Break
-    CornerDownLeft 
+    Minus 
 } from 'lucide-react';
 // @ts-ignore
 import { marked } from 'marked';
@@ -51,7 +50,7 @@ interface EditorProps {
     settings: AppSettings;
     availableCategories: string[];
     onRestore?: () => void;
-    onDeleteForever?: () => void;
+    onDeleteForever?: void;
 }
 
 const DEFAULT_CONTENT = '# New Note\n\nStart writing here...';
@@ -287,9 +286,10 @@ export const Editor: React.FC<EditorProps> = ({
             contentEditableRef.current.focus();
         }
         
-        // Handle specific line break command
-        if (command === 'insertLineBreak') {
-            document.execCommand('insertHTML', false, '<br>');
+        // Handle Horizontal Rule command
+        if (command === 'insertHorizontalRule') {
+            // Using native browser command for HR, which is compatible with contentEditable
+            document.execCommand('insertHorizontalRule', false, undefined);
         } else {
             document.execCommand(command, false, value);
         }
@@ -405,7 +405,7 @@ export const Editor: React.FC<EditorProps> = ({
 
                 // 2. Insert a temporary, unique HTML placeholder at the cursor position
                 const placeholderId = `img-temp-${Date.now()}`;
-                const tempHtml = `<span id="${placeholderId}" contenteditable="false">Image Placeholder</span>`;
+                const tempHtml = `<span id="${placeholderId}" contentEditable="false">Image Placeholder</span>`;
                 document.execCommand('insertHTML', false, tempHtml);
 
                 // 3. Convert the editor's HTML back to Markdown
@@ -768,7 +768,44 @@ export const Editor: React.FC<EditorProps> = ({
                 </div>
             )}
 
-            {/* HEADER - Collapsible on Mobile Focus */}
+            {/* MOBILE FLOATING CONTROLS (New block for controls) */}
+            {!isTrashed && (
+                 <div className="fixed top-2 right-2 z-40 md:hidden flex items-center gap-2">
+                     {/* SAVE BUTTON */}
+                     <button
+                         onClick={handleManualSave}
+                         className={`
+                             flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all
+                             ${isDirty
+                                 ? 'bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-800 hover:to-indigo-700 text-white shadow-md'
+                                 : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 shadow-sm'
+                             }
+                         `}
+                     >
+                         {isDirty ? <Save size={16} /> : <Check size={16} />}
+                     </button>
+                     
+                     {/* VIEW MODE TOGGLES */}
+                     <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-lg flex items-center shadow-md">
+                         <button
+                             onClick={() => toggleViewMode('edit')}
+                             className={`p-1.5 rounded-md transition-all ${viewMode === 'edit' ? 'bg-white dark:bg-gray-700 shadow text-blue-600 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700'}`}
+                             title="Edit Mode"
+                         >
+                             <FileCode size={16} />
+                         </button>
+                         <button
+                             onClick={() => toggleViewMode('readOnly')}
+                             className={`p-1.5 rounded-md transition-all ${viewMode === 'readOnly' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-green-400' : 'text-gray-500 hover:text-gray-700'}`}
+                             title="Read Only Mode"
+                         >
+                             {viewMode === 'readOnly' ? <Lock size={16} /> : <Eye size={16} />}
+                         </button>
+                     </div>
+                 </div>
+            )}
+
+            {/* HEADER - HIDES ON MOBILE FOCUS */}
             <div className={`flex flex-col gap-4 p-4 border-b border-gray-200 dark:border-gray-800 ${isTrashed ? 'opacity-50 pointer-events-none' : ''} ${isMobileAndFocused ? 'hidden md:flex' : ''}`}>
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                     <div className="flex-1 min-w-0 space-y-2">
@@ -784,7 +821,7 @@ export const Editor: React.FC<EditorProps> = ({
                             placeholder="Untitled Note"
                         />
 
-                        {/* TAGS - HIDDEN IN FOCUS MODE */}
+                        {/* TAGS */}
                         <div className="flex flex-wrap items-center gap-2">
                             <Tag size={14} className="text-gray-400" />
                             {tags.map(tag => (
@@ -810,8 +847,9 @@ export const Editor: React.FC<EditorProps> = ({
                         </div>
                     </div>
 
+                    {/* SAVE BUTTON AND VIEW TOGGLES ARE REMOVED FROM HERE FOR MOBILE */}
                     {!isTrashed && (
-                        <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="hidden md:flex items-center gap-2 flex-shrink-0">
                             {/* SAVE BUTTON */}
                             <button
                                 onClick={handleManualSave}
@@ -842,20 +880,12 @@ export const Editor: React.FC<EditorProps> = ({
                                 >
                                     {viewMode === 'readOnly' ? <Lock size={16} /> : <Eye size={16} />}
                                 </button>
-                                <button
-                                    onClick={() => toggleViewMode('preview')}
-                                    disabled={true} // PERMANENT LOCK
-                                    className={`p-1.5 rounded-md transition-all ${viewMode === 'preview' ? 'bg-white dark:bg-gray-700 shadow text-purple-600 dark:text-purple-400' : 'text-gray-500 hover:text-gray-700'} opacity-50 cursor-not-allowed`}
-                                    title={"Source Code view is disabled due to instability."}
-                                >
-                                    <Code size={16} />
-                                </button>
                             </div>
                         </div>
                     )}
                 </div>
 
-                {/* Category Picker (Only visible in edit mode) - HIDDEN IN FOCUS MODE */}
+                {/* Category Picker (Only visible in edit mode) */}
                 {viewMode === 'edit' && !isTrashed && (
                     <div className="flex items-center gap-2">
                         <div className="relative group flex items-center">
@@ -899,7 +929,7 @@ export const Editor: React.FC<EditorProps> = ({
                     <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', 'blockquote')}><Quote size={18} /></button>
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<pre>')}><Code size={18} /></button>
-                    <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('insertLineBreak')} title="Insert Line Break"><CornerDownLeft size={18} /></button>
+                    <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('insertHorizontalRule')} title="Insert Horizontal Rule"><Minus size={18} /></button>
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => {
                         const sel = window.getSelection();
                         if (sel && sel.rangeCount > 0) savedSelection.current = sel.getRangeAt(0);
