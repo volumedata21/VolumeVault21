@@ -25,7 +25,7 @@ const stripHtmlAndPreserveStructure = (html: string): string => {
 
   let processedHtml = html;
   
-  // 1. Remove Heading tags (Headings are extracted/styled separately)
+  // 1. Remove Heading tags (Headings will be extracted/styled separately)
   processedHtml = processedHtml.replace(/<h[1-3][^>]*>(.*?)<\/h[1-3]>/gi, '$1\n'); 
 
   // 2. Pre-process checklist items (handle the span content)
@@ -41,49 +41,6 @@ const stripHtmlAndPreserveStructure = (html: string): string => {
   return text.trim();
 };
 
-// NEW: Helper to split content into leading heading text and remaining body snippet
-const splitContentForDisplay = (noteContent: string) => {
-    const htmlContent = marked.parse(noteContent) as string;
-    const fullCleanText = stripHtmlAndPreserveStructure(htmlContent);
-    
-    const lines = fullCleanText.trim().split('\n').filter(line => line.trim() !== '');
-    
-    // Determine the heading level based on the original HTML
-    const headingLevel = getLeadingHeadingLevel(htmlContent);
-    
-    let headingText: string | null = null;
-    let bodySnippet: string = '';
-    
-    if (headingLevel > 0) {
-        // If a heading is detected, the first line is the heading text
-        headingText = lines[0] || '';
-        // The remaining lines form the body snippet (max 3 lines)
-        bodySnippet = lines.slice(1, 4).join('\n');
-    } else {
-        // If no heading, the entire content is treated as the body
-        headingText = null;
-        bodySnippet = lines.slice(0, 4).join('\n');
-    }
-
-    // Truncate the final body snippet if it's too long
-    const finalBodySnippet = bodySnippet.substring(0, 300);
-    
-    return {
-        headingText,
-        bodySnippet: finalBodySnippet,
-        headingLevel
-    };
-};
-
-// Helper to apply differentiated classes based on heading level
-const getHeadingClasses = (level: 0 | 1 | 2 | 3): string => {
-    if (level === 1) return 'font-extrabold text-lg text-gray-900 dark:text-gray-100'; // H1 (Slightly larger and bolder than H2)
-    if (level === 2) return 'font-bold text-base text-gray-800 dark:text-gray-200';      // H2 (Bold, but smaller)
-    if (level === 3) return 'font-semibold text-sm text-gray-800 dark:text-gray-300'; // H3 (Default text size, bolded)
-    return 'font-normal text-gray-600 dark:text-gray-400'; // Should not be needed but here for safety
-};
-
-
 export const Dashboard: React.FC<DashboardProps> = ({
   notes,
   onSelectNote,
@@ -93,16 +50,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const activeNotes = notes.filter(n => !n.deleted);
   const totalNotes = activeNotes.length;
 
+  // Helper to apply differentiated classes based on heading level
+  const getHeadingClasses = (level: 0 | 1 | 2 | 3): string => {
+    if (level === 1) return 'font-black text-xl text-gray-900 dark:text-gray-50'; 
+    if (level === 2) return 'font-extrabold text-lg text-gray-800 dark:text-gray-100';      
+    if (level === 3) return 'font-semibold text-base text-gray-800 dark:text-gray-200'; 
+    return 'font-normal text-gray-600 dark:text-gray-400'; 
+  };
+
   // Memoize the prepared notes to avoid recalculating HTML/snippets on every render
   const preparedNotes = useMemo(() => {
     return activeNotes.map(note => {
-      // Split the content into heading text and body snippet
-      const { headingText, bodySnippet, headingLevel } = splitContentForDisplay(note.content);
+      // 1. Convert Markdown to HTML
+      const htmlContent = marked.parse(note.content) as string;
+      
+      // 2. Get the full clean text with structure markers
+      const fullCleanText = stripHtmlAndPreserveStructure(htmlContent);
+      
+      // 3. Split the text into the first line (potential heading) and the body
+      const lines = fullCleanText.trim().split('\n').filter(line => line.trim() !== '');
+      
+      const headingLevel = getLeadingHeadingLevel(htmlContent);
+      
+      // The snippet we show is the first line + a small segment of the rest
+      const firstLine = lines[0] || '';
+      // Join the next few lines for context preview
+      const bodySnippet = lines.slice(1, 4).join('\n'); // Show up to 3 lines of body
 
       return {
         ...note,
-        headingText,
-        bodySnippet,
+        headingLine: headingLevel > 0 ? firstLine : '',
+        bodySnippet: headingLevel > 0 ? bodySnippet : firstLine + '\n' + lines.slice(1, 3).join('\n'), // If no heading, first line is part of body
         headingLevel
       };
     });
@@ -124,24 +102,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
               onClick={() => onSelectNote(note.id)}
               className="group flex flex-col p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 text-left border border-gray-200 dark:border-gray-700 h-full min-h-[150px]"
             >
-              <h3 className="text-lg font-semibold truncate text-gray-900 dark:text-gray-100 mb-2">
+              {/* Note Title */}
+              <h3 className="text-lg font-semibold truncate text-blue-600 dark:text-sky-400 mb-2">
                 {note.title || 'Untitled Note'}
               </h3>
               
-              {/* RENDER 1: Heading Line (rendered if detected, with hierarchical styling) */}
-              {note.headingText && (
+              {/* Heading Line (Only rendered if detected) */}
+              {note.headingLevel > 0 && (
                 <div className={`flex-shrink-0 whitespace-pre-wrap ${getHeadingClasses(note.headingLevel)}`}>
-                  {note.headingText}
+                  {note.headingLine}
                 </div>
               )}
 
-              {/* RENDER 2: Body Snippet (Standard text size/weight) */}
+              {/* Body Snippet (Standard text size/weight) */}
               <div className="text-sm text-gray-600 dark:text-gray-400 flex-1 overflow-hidden whitespace-pre-wrap pt-1">
                 {note.bodySnippet || 'No content preview.'}
               </div>
               
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
-                Updated: {new Date(note.updatedAt).toLocaleDateString()}
+              {/* FIX: Date format updated to long month name */}
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
+                Updated: {new Date(note.updatedAt).toLocaleDateString(undefined, {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                })}
               </p>
             </button>
           ))}
