@@ -189,16 +189,15 @@ if (process.env.NODE_ENV === 'production') {
     // 1. Serve the built client files (like JS, CSS, PWA assets)
     app.use(express.static(path.join(__dirname, 'dist')));
     
-    // 2. SPA Fallback: For any GET request that didn't match a static file or an API route, serve index.html
-    // This handles deep links and client-side routing.
-    app.get('*', (req, res) => {
-        // Ensure we don't accidentally intercept non-API requests like /uploads or favicon.
-        if (!req.path.startsWith('/api') && req.method === 'GET') {
-             res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-        } else {
-             // For POST/PUT/DELETE/etc. requests that fall through, respond with 404 (optional)
-             res.status(404).end();
-        }
+    // 2. SPA Fallback: Use a regex path to bypass path-to-regexp parsing bug.
+    // This catches all remaining GET routes and serves index.html.
+    app.get(/^(?!\/api|\/uploads).+/, (req, res) => {
+        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+    
+    // Fallback for all other methods (POST, PUT, DELETE, etc.) that didn't match an API route
+    app.use((req, res) => {
+        res.status(404).end();
     });
 }
 
