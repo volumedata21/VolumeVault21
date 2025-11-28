@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Note } from './types';
-import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon, Grid, LayoutDashboard } from 'lucide-react';
+import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon, Grid, LayoutDashboard, AppWindow } from 'lucide-react';
 
 interface SidebarProps {
   notes: Note[];
@@ -17,7 +17,7 @@ interface SidebarProps {
   view: 'notes' | 'trash';
   onChangeView: (view: 'notes' | 'trash') => void;
   trashCount: number;
-  navigateToDashboard: () => void; 
+  navigateToDashboard: () => void; // Prop from App.tsx
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -35,7 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   view,
   onChangeView,
   trashCount,
-  navigateToDashboard 
+  navigateToDashboard // Destructure the prop
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -93,9 +93,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCollapsedCategories(new Set());
   };
 
-  const isAllCollapsed = collapsedCategories.size === sortedCategories.length;
-  const isAllExpanded = collapsedCategories.size === 0;
-
+  // NEW FIX: Determines if the button should display 'Expand All' (if any notes are collapsed)
+  const shouldShowExpand = collapsedCategories.size > 0;
 
   const isTrash = view === 'trash';
   
@@ -108,7 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     `}>
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
-        {/* FIX: Make title clickable to navigate to dashboard AND use hover:brightness-110 */}
+        {/* Make title clickable to navigate to dashboard AND use hover:brightness-110 */}
         <button 
             onClick={isTrash ? undefined : navigateToDashboard}
             className={`
@@ -178,8 +177,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             : 'text-gray-700 dark:text-gray-300'
                     }`}
                 >
-                    {/* FIX: Using Grid icon */}
-                    <Grid size={20} /> Dashboard
+                    {/* Using AppWindow icon */}
+                    <AppWindow size={20} /> Dashboard
                 </button>
             </div>
         )}
@@ -207,10 +206,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </select>
 
                 <button
-                    onClick={isAllExpanded ? collapseAll : expandAll}
+                    // FIX: Click handler and text logic based on shouldShowExpand
+                    onClick={shouldShowExpand ? expandAll : collapseAll}
                     className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                 >
-                    {isAllExpanded ? 'Collapse All' : 'Expand All'}
+                    {/* If any category is collapsed, offer to EXPAND ALL */}
+                    {shouldShowExpand ? 'Expand All' : 'Collapse All'}
                 </button>
             </div>
             

@@ -234,7 +234,7 @@ export const Editor: React.FC<EditorProps> = ({
         if (contentEditableRef.current) {
             const html = contentEditableRef.current.innerHTML;
             const md = turndownService.turndown(html);
-            onChange({ content: md });
+            onChange({ content: md }); 
             setIsDirty(true);
         }
     };
@@ -247,8 +247,8 @@ export const Editor: React.FC<EditorProps> = ({
     };
 
     const toggleViewMode = (mode: 'edit' | 'preview' | 'readOnly') => {
-        if (isTrashed && mode === 'edit') return;
-
+        if (isTrashed && mode === 'edit') return; 
+        
         // PERMANENT LOCK: Block access to the unstable Markdown view
         if (mode === 'preview') {
             alert("Markdown Source Code view is currently disabled due to instability and potential data loss.");
@@ -258,11 +258,11 @@ export const Editor: React.FC<EditorProps> = ({
         if (viewMode === 'preview' && mode !== 'preview') {
             // This block should never be reached now, but handle exit safely
             const mdToParse = sourceTextareaRef.current?.value || note.content;
-
+            
             if (mdToParse !== note.content) {
-                onChange({ content: mdToParse });
+               onChange({ content: mdToParse }); 
             }
-
+            
             const html = marked.parse(mdToParse) as string;
             setEditorContent(html);
 
@@ -274,8 +274,8 @@ export const Editor: React.FC<EditorProps> = ({
             // This block should never be reached
             const html = contentEditableRef.current?.innerHTML || '';
             const md = turndownService.turndown(html);
-
-            setEditorContent(md);
+            
+            setEditorContent(md); 
         }
         setViewMode(mode);
     };
@@ -306,7 +306,7 @@ export const Editor: React.FC<EditorProps> = ({
                     const blockNode = node as HTMLElement;
                     const p = document.createElement('p');
                     p.innerHTML = '<br>';
-
+                    
                     if (blockNode.nextSibling) {
                         blockNode.parentNode?.insertBefore(p, blockNode.nextSibling);
                     } else {
@@ -387,62 +387,38 @@ export const Editor: React.FC<EditorProps> = ({
                 console.error('Image upload FAILED: HTTP Status', response.status);
                 console.error('Response body:', errorText);
                 alert('Image upload failed. Check console for details.');
-
+                
                 if (fileInputRef.current) fileInputRef.current.value = '';
                 return;
             }
 
             const data = await response.json();
-            const imageUrl = data.url;
+            const imageUrl = data.url; 
 
             const imageMarkdown = `![Image](${imageUrl})`;
-
-            // 1. Restore the saved selection
-            if (savedSelection.current && contentEditableRef.current) {
+            
+            if (savedSelection.current) {
                 const sel = window.getSelection();
                 sel?.removeAllRanges();
                 sel?.addRange(savedSelection.current);
-
-                // 2. Insert a temporary, unique HTML placeholder at the cursor position
-                const placeholderId = `img-temp-${Date.now()}`;
-                const tempHtml = `<span id="${placeholderId}" contentEditable="false">Image Placeholder</span>`;
-                document.execCommand('insertHTML', false, tempHtml);
-
-                // 3. Convert the editor's HTML back to Markdown
-                const currentHtml = contentEditableRef.current.innerHTML;
-                const md = turndownService.turndown(currentHtml);
-
-                // 4. Find the placeholder in the Markdown and replace it with the final image markdown
-                // Find the placeholder text. Turndown may have converted the <span> to a simple text node.
-                const placeholderText = 'Image Placeholder';
-
-                // This is the key replacement: use the Markdown representation of the image
-                const updatedMd = md.replace(placeholderText, imageMarkdown);
-
-                // 5. Update the note content state with the correctly placed Markdown
-                onChange({ content: updatedMd });
-
-                // 6. Re-render the editor with the new content (including the image)
-                const newHtml = marked.parse(updatedMd) as string;
-                contentEditableRef.current.innerHTML = newHtml;
-                setIsDirty(true);
-                attachCopyButtons();
-
-                // 7. Clear the selection reference
-                savedSelection.current = null;
-
             } else {
-                // Fallback for when no selection was saved (e.g., if the user didn't click the button)
-                const currentMd = turndownService.turndown(contentEditableRef.current?.innerHTML || '');
-                const combinedMd = currentMd.trim() + '\n\n' + imageMarkdown;
+                contentEditableRef.current?.focus();
+            }
 
-                onChange({ content: combinedMd });
+            contentEditableRef.current?.focus();
+            
+            document.execCommand('insertHTML', false, ' '); 
 
-                const newHtml = marked.parse(combinedMd) as string;
-                if (contentEditableRef.current) {
-                    contentEditableRef.current.innerHTML = newHtml;
-                    setIsDirty(true);
-                }
+            const currentMd = turndownService.turndown(contentEditableRef.current.innerHTML);
+            
+            const combinedMd = currentMd.trim() + '\n\n' + imageMarkdown; 
+            
+            onChange({ content: combinedMd });
+            
+            const newHtml = marked.parse(combinedMd) as string;
+            if (contentEditableRef.current) {
+                 contentEditableRef.current.innerHTML = newHtml;
+                 setIsDirty(true);
             }
 
         } catch (error) {
@@ -450,41 +426,6 @@ export const Editor: React.FC<EditorProps> = ({
             alert('Image upload failed. Check console for details.');
         } finally {
             if (fileInputRef.current) fileInputRef.current.value = '';
-        }
-    };
-
-    // =======================================================
-    // NEW: Drag and Drop Handlers
-    // =======================================================
-
-    const handleDragPrevent = (e: React.DragEvent) => {
-        // Prevent default browser behavior to allow dropping files
-        e.preventDefault();
-        e.stopPropagation();
-    };
-
-    const handleDrop = async (e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (viewMode !== 'edit' || isTrashed) return;
-
-        const files = e.dataTransfer.files;
-        if (files.length === 0) return;
-
-        const imageFile = Array.from(files).find(file => file.type.startsWith('image/'));
-
-        if (imageFile) {
-            // Create a synthetic object to mock the e.target.files structure
-            const syntheticEvent = {
-                target: { files: [imageFile] } as unknown as HTMLInputElement
-            } as React.ChangeEvent<HTMLInputElement>;
-            
-            // Try to focus editor before calling upload handler
-            contentEditableRef.current?.focus(); 
-            
-            // Call the existing image upload logic
-            await handleImageUpload(syntheticEvent);
         }
     };
 
@@ -496,7 +437,7 @@ export const Editor: React.FC<EditorProps> = ({
             const checkbox = target as HTMLInputElement;
             const li = checkbox.closest('li');
             const span = li?.querySelector('span');
-
+            
             if (isTrashed) {
                 e.preventDefault();
                 return;
@@ -517,15 +458,15 @@ export const Editor: React.FC<EditorProps> = ({
                     }
                 }
                 if (viewMode === 'readOnly') {
-                    const html = contentEditableRef.current?.innerHTML || '';
-                    const md = turndownService.turndown(html);
-                    onChange({ content: md });
+                   const html = contentEditableRef.current?.innerHTML || '';
+                   const md = turndownService.turndown(html);
+                   onChange({ content: md }); 
                 } else {
-                    handleVisualInput();
+                   handleVisualInput();
                 }
             }, 50);
         }
-
+        
         if (viewMode === 'edit' && target === e.currentTarget) {
             const content = contentEditableRef.current;
             if (!content) return;
@@ -534,14 +475,14 @@ export const Editor: React.FC<EditorProps> = ({
                 const p = document.createElement('p');
                 p.innerHTML = '<br>';
                 content.appendChild(p);
-
+                
                 const range = document.createRange();
                 range.setStart(p, 0);
                 range.collapse(true);
                 const sel = window.getSelection();
                 sel?.removeAllRanges();
                 sel?.addRange(range);
-
+                
                 handleVisualInput();
             }
         }
@@ -549,7 +490,7 @@ export const Editor: React.FC<EditorProps> = ({
 
     const handleEditorKeyDown = (e: React.KeyboardEvent) => {
         if (viewMode !== 'edit' || isTrashed) return;
-
+        
         if (e.metaKey || e.ctrlKey) {
             const key = e.key.toLowerCase();
             if (!e.shiftKey) {
@@ -560,7 +501,7 @@ export const Editor: React.FC<EditorProps> = ({
                 if (key === 'x' || key === 's') { e.preventDefault(); execCmd('strikeThrough'); return; }
             }
         }
-
+        
         const breakOutOfBlock = (nodeName: string) => {
             const selection = window.getSelection();
             if (!selection || !selection.rangeCount) return false;
@@ -569,29 +510,29 @@ export const Editor: React.FC<EditorProps> = ({
                 node = node.parentNode;
             }
             if (node && node.nodeName === nodeName) {
-                const p = document.createElement('p');
-                p.innerHTML = '<br>';
-                if (node.nextSibling) node.parentNode?.insertBefore(p, node.nextSibling);
-                else node.parentNode?.appendChild(p);
-
-                const range = document.createRange();
-                range.setStart(p, 0);
-                range.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(range);
-                return true;
+                 const p = document.createElement('p');
+                 p.innerHTML = '<br>';
+                 if (node.nextSibling) node.parentNode?.insertBefore(p, node.nextSibling);
+                 else node.parentNode?.appendChild(p);
+                 
+                 const range = document.createRange();
+                 range.setStart(p, 0);
+                 range.collapse(true);
+                 selection.removeAllRanges();
+                 selection.addRange(range);
+                 return true;
             }
             return false;
         };
 
         if (e.key === 'Enter') {
             if (e.shiftKey) {
-                if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
+                 if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
                     e.preventDefault();
                     return;
-                }
+                 }
             }
-
+            
             const selection = window.getSelection();
             if (selection && selection.rangeCount > 0) {
                 const range = selection.getRangeAt(0);
@@ -604,7 +545,7 @@ export const Editor: React.FC<EditorProps> = ({
                     const checkbox = li.querySelector('input[type="checkbox"]');
                     if (checkbox) {
                         e.preventDefault();
-
+                        
                         const span = li.querySelector('span');
                         const textContent = span ? span.textContent || '' : li.textContent || '';
                         const isEmpty = textContent.trim() === '';
@@ -613,7 +554,7 @@ export const Editor: React.FC<EditorProps> = ({
                             const ul = li.parentElement;
                             const p = document.createElement('p');
                             p.innerHTML = '<br>';
-
+                            
                             if (ul) {
                                 if (li.nextSibling) {
                                     ul.parentNode?.insertBefore(p, ul.nextSibling);
@@ -625,7 +566,7 @@ export const Editor: React.FC<EditorProps> = ({
                             } else {
                                 li.replaceWith(p);
                             }
-
+                            
                             const newRange = document.createRange();
                             newRange.setStart(p, 0);
                             newRange.collapse(true);
@@ -636,13 +577,13 @@ export const Editor: React.FC<EditorProps> = ({
                             newLi.className = 'checklist-item';
                             newLi.style.cssText = 'list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;';
                             newLi.innerHTML = `<input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;"><span><br></span>`;
-
+                            
                             if (li.nextSibling) {
                                 li.parentNode?.insertBefore(newLi, li.nextSibling);
                             } else {
                                 li.parentNode?.appendChild(newLi);
                             }
-
+                            
                             const newSpan = newLi.querySelector('span');
                             if (newSpan) {
                                 const newRange = document.createRange();
@@ -657,18 +598,18 @@ export const Editor: React.FC<EditorProps> = ({
                     }
                 }
             }
-
+            
             if (selection && selection.isCollapsed) {
-                const node = selection.anchorNode;
-                if (node && (node.textContent === '' || node.textContent === '\n')) {
-                    if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
-                        e.preventDefault();
-                        return;
-                    }
-                }
+                 const node = selection.anchorNode;
+                 if (node && (node.textContent === '' || node.textContent === '\n')) {
+                     if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
+                         e.preventDefault();
+                         return;
+                     }
+                 }
             }
         }
-
+        
         if (e.key === 'Backspace') {
             const selection = window.getSelection();
             if (selection && selection.isCollapsed) {
@@ -676,27 +617,27 @@ export const Editor: React.FC<EditorProps> = ({
                 while (li && li.nodeName !== 'LI' && li !== contentEditableRef.current) {
                     li = li.parentNode as HTMLElement;
                 }
-
+                
                 if (li && li.nodeName === 'LI' && li.querySelector('input[type="checkbox"]')) {
                     const range = selection.getRangeAt(0);
                     const span = li.querySelector('span');
                     const isAtStart = (range.startContainer === span && range.startOffset === 0) ||
-                        (range.startContainer.parentNode === span && range.startOffset === 0);
+                                      (range.startContainer.parentNode === span && range.startOffset === 0);
 
                     if (isAtStart) {
-                        e.preventDefault();
-                        const checkbox = li.querySelector('input[type="checkbox"]');
-                        if (checkbox) checkbox.remove();
-                        if (span) {
-                            while (span.firstChild) {
-                                li.insertBefore(span.firstChild, span);
-                            }
-                            span.remove();
-                        }
-                        li.style.cssText = '';
-                        li.classList.remove('checklist-item');
-                        handleVisualInput();
-                        return;
+                         e.preventDefault();
+                         const checkbox = li.querySelector('input[type="checkbox"]');
+                         if (checkbox) checkbox.remove();
+                         if (span) {
+                             while(span.firstChild) {
+                                 li.insertBefore(span.firstChild, span);
+                             }
+                             span.remove();
+                         }
+                         li.style.cssText = '';
+                         li.classList.remove('checklist-item');
+                         handleVisualInput();
+                         return;
                     }
                 }
             }
@@ -849,12 +790,17 @@ export const Editor: React.FC<EditorProps> = ({
                         <input
                             type="text"
                             value={title}
-                            onChange={(e) => setTitle(e.target.value)}
+                            // CRITICAL FIX: Push title state immediately to App.tsx state.
+                            onChange={(e) => {
+                                setTitle(e.target.value);
+                                onChange({ title: e.target.value }, false); // Do not trigger save to disk here
+                            }}
                             onFocus={handleTitleFocus}
                             onBlur={handleTitleBlur}
                             readOnly={viewMode === 'readOnly' || isTrashed}
-                            className={`text-2xl font-bold bg-transparent border-none focus:ring-0 w-full ${isPlaceholderTitle ? 'text-gray-400 dark:text-gray-500 italic' : 'text-gray-900 dark:text-white'
-                                }`}
+                            className={`text-2xl font-bold bg-transparent border-none focus:ring-0 w-full ${
+                                isPlaceholderTitle ? 'text-gray-400 dark:text-gray-500 italic' : 'text-gray-900 dark:text-white'
+                            }`}
                             placeholder="Untitled Note"
                         />
 
@@ -990,10 +936,6 @@ export const Editor: React.FC<EditorProps> = ({
                     <div
                         className={`h-full overflow-y-auto p-8 bg-white dark:bg-gray-900 ${viewMode === 'readOnly' || isTrashed ? 'cursor-default' : 'cursor-text'}`}
                         onClick={handleEditorClick}
-                        // NEW DRAG HANDLERS
-                        onDragOver={handleDragPrevent} 
-                        onDragEnter={handleDragPrevent}
-                        onDrop={handleDrop}
                     >
                         <div
                             ref={contentEditableRef}
