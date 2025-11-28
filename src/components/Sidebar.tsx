@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Note } from './types'; // Corrected import path
-import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon } from 'lucide-react';
+import { Note } from './types';
+import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon, Grid, LayoutDashboard } from 'lucide-react';
 
 interface SidebarProps {
   notes: Note[];
@@ -17,6 +17,7 @@ interface SidebarProps {
   view: 'notes' | 'trash';
   onChangeView: (view: 'notes' | 'trash') => void;
   trashCount: number;
+  navigateToDashboard: () => void; 
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -33,11 +34,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenSettings,
   view,
   onChangeView,
-  trashCount
+  trashCount,
+  navigateToDashboard 
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
-  // NEW STATE: Sort criterion
+  // State: Sort criterion
   const [sortCriterion, setSortCriterion] = useState<'updatedAt' | 'title'>('updatedAt');
 
   const filteredNotes = useMemo(() => {
@@ -82,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCollapsedCategories(newCollapsed);
   };
   
-  // NEW HANDLERS: Collapse/Expand All
+  // Handlers: Collapse/Expand All
   const collapseAll = () => {
     setCollapsedCategories(new Set(sortedCategories));
   };
@@ -96,6 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
 
   const isTrash = view === 'trash';
+  
 
   return (
     <div className={`
@@ -105,10 +108,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     `}>
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
-        <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r"
-            style={{backgroundImage: 'linear-gradient(to right, #DD3D2D, #F67E4B)'}}>
+        {/* FIX: Make title clickable to navigate to dashboard AND use hover:brightness-110 */}
+        <button 
+            onClick={isTrash ? undefined : navigateToDashboard}
+            className={`
+                text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r cursor-pointer 
+                ${isTrash ? 'pointer-events-none' : 'hover:brightness-110 transition-all'}
+            `}
+            style={{backgroundImage: 'linear-gradient(to right, #DD3D2D, #F67E4B)'}}
+            title="Go to Dashboard"
+        >
           {isTrash ? 'Trash Bin' : 'VolumeVault21'}
-        </h1>
+        </button>
         <button onClick={onCloseMobile} className="md:hidden p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400">
           <X size={20} />
         </button>
@@ -153,18 +164,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Note List */}
       <div className="flex-1 overflow-y-auto px-2">
+        {/* Dashboard Link */}
+        {!isTrash && (
+            <div className="p-2">
+                <button
+                    onClick={() => {
+                        navigateToDashboard();
+                        onCloseMobile();
+                    }}
+                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 font-semibold ${
+                        currentNoteId === null 
+                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
+                            : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                >
+                    {/* FIX: Using Grid icon */}
+                    <Grid size={20} /> Dashboard
+                </button>
+            </div>
+        )}
+        
         {filteredNotes.length === 0 ? (
           <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
             {searchTerm 
                 ? 'No notes found' 
                 : isTrash 
                     ? 'Trash is empty' 
-                    : 'Create your first note!'}
+                    : 'Select a note or create a new one!'}
           </div>
         ) : (
           <div className="space-y-4 pb-4">
             
-            {/* NEW: Sort & Collapse Controls */}
+            {/* Sort & Collapse Controls */}
             <div className="flex justify-between items-center px-2 pt-2 pb-1 text-xs">
                 <select
                     value={sortCriterion}
@@ -198,6 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {groupedNotes[category].map(note => (
                       <li key={note.id}>
                         <button
+                          // FIX: Call onSelectNote and close sidebar
                           onClick={() => {
                             onSelectNote(note.id);
                             onCloseMobile(); 
