@@ -37,6 +37,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  // NEW STATE: Sort criterion
+  const [sortCriterion, setSortCriterion] = useState<'updatedAt' | 'title'>('updatedAt');
 
   const filteredNotes = useMemo(() => {
     return notes
@@ -49,8 +51,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           (note.tags && note.tags.some(tag => tag.toLowerCase().includes(searchLower)))
         );
       })
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [notes, searchTerm]);
+      .sort((a, b) => {
+          if (sortCriterion === 'title') {
+              return a.title.localeCompare(b.title);
+          }
+          // Default or 'updatedAt'
+          return b.updatedAt - a.updatedAt;
+      });
+  }, [notes, searchTerm, sortCriterion]);
 
   // Group by category
   const groupedNotes = useMemo(() => {
@@ -73,6 +81,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
     setCollapsedCategories(newCollapsed);
   };
+  
+  // NEW HANDLERS: Collapse/Expand All
+  const collapseAll = () => {
+    setCollapsedCategories(new Set(sortedCategories));
+  };
+
+  const expandAll = () => {
+    setCollapsedCategories(new Set());
+  };
+
+  const isAllCollapsed = collapsedCategories.size === sortedCategories.length;
+  const isAllExpanded = collapsedCategories.size === 0;
+
 
   const isTrash = view === 'trash';
 
@@ -142,6 +163,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ) : (
           <div className="space-y-4 pb-4">
+            
+            {/* NEW: Sort & Collapse Controls */}
+            <div className="flex justify-between items-center px-2 pt-2 pb-1 text-xs">
+                <select
+                    value={sortCriterion}
+                    onChange={(e) => setSortCriterion(e.target.value as 'updatedAt' | 'title')}
+                    className="bg-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer focus:outline-none"
+                >
+                    <option value="updatedAt">Sort by Date</option>
+                    <option value="title">Sort by Title</option>
+                </select>
+
+                <button
+                    onClick={isAllExpanded ? collapseAll : expandAll}
+                    className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                >
+                    {isAllExpanded ? 'Collapse All' : 'Expand All'}
+                </button>
+            </div>
+            
             {sortedCategories.map(category => (
               <div key={category} className="space-y-1">
                 <button
@@ -176,7 +217,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </p>
                           </div>
                           
-                          <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {/* FIX: Force visibility on non-desktop screens */}
+                          <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:md:opacity-100 transition-opacity">
                              {!isTrash ? (
                                 <div 
                                     onClick={(e) => {
