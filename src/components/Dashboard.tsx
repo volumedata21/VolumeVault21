@@ -10,6 +10,15 @@ interface DashboardProps {
   onCreateNote: () => void;
 }
 
+// NEW: Helper function to decode HTML entities (e.g., converts &#39; back to ')
+const decodeHTMLEntities = (text: string): string => {
+    // Uses a temporary DOM element (like a textarea) to leverage browser decoding
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = text;
+    return textarea.value;
+};
+
+
 // Utility to detect the level of the leading heading (must be run on full HTML)
 const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
     const trimmedHtml = html.trim();
@@ -38,7 +47,8 @@ const stripHtmlAndPreserveStructure = (html: string): string => {
   // 4. Convert HTML entities and remove remaining tags
   const text = processedHtml.replace(/<[^>]+>/g, '');
   
-  return text.trim();
+  // CRITICAL FIX: Decode entities before returning the clean text
+  return decodeHTMLEntities(text).trim();
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -52,6 +62,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Helper to apply differentiated classes based on heading level
   const getHeadingClasses = (level: 0 | 1 | 2 | 3): string => {
+    // FIX: Increased font size and weight for better pop and hierarchy
     if (level === 1) return 'font-black text-xl text-gray-900 dark:text-gray-50'; 
     if (level === 2) return 'font-extrabold text-lg text-gray-800 dark:text-gray-100';      
     if (level === 3) return 'font-semibold text-base text-gray-800 dark:text-gray-200'; 
@@ -119,7 +130,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {note.bodySnippet || 'No content preview.'}
               </div>
               
-              {/* FIX: Date format updated to long month name */}
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
                 Updated: {new Date(note.updatedAt).toLocaleDateString(undefined, {
                     year: 'numeric',
