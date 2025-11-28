@@ -8,6 +8,8 @@ export interface Note {
   tags: string[];
   deleted?: boolean;
   deletedAt?: number;
+  // NEW: Pinned property
+  isPinned?: boolean; 
 }
 
 export type ViewMode = 'edit' | 'preview' | 'split';

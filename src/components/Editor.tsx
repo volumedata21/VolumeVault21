@@ -50,7 +50,7 @@ interface EditorProps {
     settings: AppSettings;
     availableCategories: string[];
     onRestore?: () => void;
-    onDeleteForever?: void;
+    onDeleteForever?: () => void;
 }
 
 const DEFAULT_CONTENT = '# New Note\n\nStart writing here...';
@@ -123,8 +123,17 @@ export const Editor: React.FC<EditorProps> = ({
         setIsDirty(false);
         setIsContentFocused(false); // Reset focus state on note change
 
-        const html = marked.parse(note.content) as string;
-        setEditorContent(viewMode === 'preview' ? note.content : html);
+        // FIX: Safely handle missing content and parsing errors
+        const safeContent = note.content || '';
+        let html = '';
+        try {
+            html = marked.parse(safeContent) as string;
+        } catch (e) {
+            console.error('Error parsing markdown in Editor:', e);
+            html = '<p>Error loading content.</p>';
+        }
+
+        setEditorContent(viewMode === 'preview' ? safeContent : html);
 
         if (note.deleted) {
             setViewMode('readOnly');
@@ -136,7 +145,7 @@ export const Editor: React.FC<EditorProps> = ({
             contentEditableRef.current.innerHTML = html;
             attachCopyButtons();
         }
-    }, [note.id, note.deleted]);
+    }, [note.id, note.deleted]); 
 
     // Handle Copy Code Buttons
     const attachCopyButtons = useCallback(() => {
@@ -234,7 +243,7 @@ export const Editor: React.FC<EditorProps> = ({
         if (contentEditableRef.current) {
             const html = contentEditableRef.current.innerHTML;
             const md = turndownService.turndown(html);
-            onChange({ content: md }); 
+            onChange({ content: md });
             setIsDirty(true);
         }
     };
@@ -247,8 +256,8 @@ export const Editor: React.FC<EditorProps> = ({
     };
 
     const toggleViewMode = (mode: 'edit' | 'preview' | 'readOnly') => {
-        if (isTrashed && mode === 'edit') return; 
-        
+        if (isTrashed && mode === 'edit') return;
+
         // PERMANENT LOCK: Block access to the unstable Markdown view
         if (mode === 'preview') {
             alert("Markdown Source Code view is currently disabled due to instability and potential data loss.");
@@ -258,11 +267,11 @@ export const Editor: React.FC<EditorProps> = ({
         if (viewMode === 'preview' && mode !== 'preview') {
             // This block should never be reached now, but handle exit safely
             const mdToParse = sourceTextareaRef.current?.value || note.content;
-            
+
             if (mdToParse !== note.content) {
-               onChange({ content: mdToParse }); 
+                onChange({ content: mdToParse });
             }
-            
+
             const html = marked.parse(mdToParse) as string;
             setEditorContent(html);
 
@@ -274,8 +283,8 @@ export const Editor: React.FC<EditorProps> = ({
             // This block should never be reached
             const html = contentEditableRef.current?.innerHTML || '';
             const md = turndownService.turndown(html);
-            
-            setEditorContent(md); 
+
+            setEditorContent(md);
         }
         setViewMode(mode);
     };
@@ -288,7 +297,6 @@ export const Editor: React.FC<EditorProps> = ({
         
         // Handle Horizontal Rule command
         if (command === 'insertHorizontalRule') {
-            // Using native browser command for HR, which is compatible with contentEditable
             document.execCommand('insertHorizontalRule', false, undefined);
         } else {
             document.execCommand(command, false, value);
@@ -306,7 +314,7 @@ export const Editor: React.FC<EditorProps> = ({
                     const blockNode = node as HTMLElement;
                     const p = document.createElement('p');
                     p.innerHTML = '<br>';
-                    
+
                     if (blockNode.nextSibling) {
                         blockNode.parentNode?.insertBefore(p, blockNode.nextSibling);
                     } else {
@@ -387,16 +395,16 @@ export const Editor: React.FC<EditorProps> = ({
                 console.error('Image upload FAILED: HTTP Status', response.status);
                 console.error('Response body:', errorText);
                 alert('Image upload failed. Check console for details.');
-                
+
                 if (fileInputRef.current) fileInputRef.current.value = '';
                 return;
             }
 
             const data = await response.json();
-            const imageUrl = data.url; 
+            const imageUrl = data.url;
 
             const imageMarkdown = `![Image](${imageUrl})`;
-            
+
             if (savedSelection.current) {
                 const sel = window.getSelection();
                 sel?.removeAllRanges();
@@ -406,19 +414,14 @@ export const Editor: React.FC<EditorProps> = ({
             }
 
             contentEditableRef.current?.focus();
-            
             document.execCommand('insertHTML', false, ' '); 
-
             const currentMd = turndownService.turndown(contentEditableRef.current.innerHTML);
-            
             const combinedMd = currentMd.trim() + '\n\n' + imageMarkdown; 
-            
             onChange({ content: combinedMd });
-            
             const newHtml = marked.parse(combinedMd) as string;
             if (contentEditableRef.current) {
-                 contentEditableRef.current.innerHTML = newHtml;
-                 setIsDirty(true);
+                contentEditableRef.current.innerHTML = newHtml;
+                setIsDirty(true);
             }
 
         } catch (error) {
@@ -429,15 +432,39 @@ export const Editor: React.FC<EditorProps> = ({
         }
     };
 
+    const handleDragPrevent = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
 
-    // Editor Interactivity
+    const handleDrop = async (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (viewMode !== 'edit' || isTrashed) return;
+
+        const files = e.dataTransfer.files;
+        if (files.length === 0) return;
+
+        const imageFile = Array.from(files).find(file => file.type.startsWith('image/'));
+
+        if (imageFile) {
+            const syntheticEvent = {
+                target: { files: [imageFile] } as unknown as HTMLInputElement
+            } as React.ChangeEvent<HTMLInputElement>;
+            
+            contentEditableRef.current?.focus(); 
+            await handleImageUpload(syntheticEvent);
+        }
+    };
+
     const handleEditorClick = (e: React.MouseEvent) => {
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
             const checkbox = target as HTMLInputElement;
             const li = checkbox.closest('li');
             const span = li?.querySelector('span');
-            
+
             if (isTrashed) {
                 e.preventDefault();
                 return;
@@ -458,15 +485,15 @@ export const Editor: React.FC<EditorProps> = ({
                     }
                 }
                 if (viewMode === 'readOnly') {
-                   const html = contentEditableRef.current?.innerHTML || '';
-                   const md = turndownService.turndown(html);
-                   onChange({ content: md }); 
+                    const html = contentEditableRef.current?.innerHTML || '';
+                    const md = turndownService.turndown(html);
+                    onChange({ content: md });
                 } else {
-                   handleVisualInput();
+                    handleVisualInput();
                 }
             }, 50);
         }
-        
+
         if (viewMode === 'edit' && target === e.currentTarget) {
             const content = contentEditableRef.current;
             if (!content) return;
@@ -475,14 +502,14 @@ export const Editor: React.FC<EditorProps> = ({
                 const p = document.createElement('p');
                 p.innerHTML = '<br>';
                 content.appendChild(p);
-                
+
                 const range = document.createRange();
                 range.setStart(p, 0);
                 range.collapse(true);
                 const sel = window.getSelection();
                 sel?.removeAllRanges();
                 sel?.addRange(range);
-                
+
                 handleVisualInput();
             }
         }
@@ -490,7 +517,7 @@ export const Editor: React.FC<EditorProps> = ({
 
     const handleEditorKeyDown = (e: React.KeyboardEvent) => {
         if (viewMode !== 'edit' || isTrashed) return;
-        
+
         if (e.metaKey || e.ctrlKey) {
             const key = e.key.toLowerCase();
             if (!e.shiftKey) {
@@ -501,7 +528,7 @@ export const Editor: React.FC<EditorProps> = ({
                 if (key === 'x' || key === 's') { e.preventDefault(); execCmd('strikeThrough'); return; }
             }
         }
-        
+
         const breakOutOfBlock = (nodeName: string) => {
             const selection = window.getSelection();
             if (!selection || !selection.rangeCount) return false;
@@ -510,29 +537,29 @@ export const Editor: React.FC<EditorProps> = ({
                 node = node.parentNode;
             }
             if (node && node.nodeName === nodeName) {
-                 const p = document.createElement('p');
-                 p.innerHTML = '<br>';
-                 if (node.nextSibling) node.parentNode?.insertBefore(p, node.nextSibling);
-                 else node.parentNode?.appendChild(p);
-                 
-                 const range = document.createRange();
-                 range.setStart(p, 0);
-                 range.collapse(true);
-                 selection.removeAllRanges();
-                 selection.addRange(range);
-                 return true;
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                if (node.nextSibling) node.parentNode?.insertBefore(p, node.nextSibling);
+                else node.parentNode?.appendChild(p);
+
+                const range = document.createRange();
+                range.setStart(p, 0);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                return true;
             }
             return false;
         };
 
         if (e.key === 'Enter') {
             if (e.shiftKey) {
-                 if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
+                if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
                     e.preventDefault();
                     return;
-                 }
+                }
             }
-            
+
             const selection = window.getSelection();
             if (selection && selection.rangeCount > 0) {
                 const range = selection.getRangeAt(0);
@@ -545,7 +572,7 @@ export const Editor: React.FC<EditorProps> = ({
                     const checkbox = li.querySelector('input[type="checkbox"]');
                     if (checkbox) {
                         e.preventDefault();
-                        
+
                         const span = li.querySelector('span');
                         const textContent = span ? span.textContent || '' : li.textContent || '';
                         const isEmpty = textContent.trim() === '';
@@ -554,7 +581,7 @@ export const Editor: React.FC<EditorProps> = ({
                             const ul = li.parentElement;
                             const p = document.createElement('p');
                             p.innerHTML = '<br>';
-                            
+
                             if (ul) {
                                 if (li.nextSibling) {
                                     ul.parentNode?.insertBefore(p, ul.nextSibling);
@@ -566,7 +593,7 @@ export const Editor: React.FC<EditorProps> = ({
                             } else {
                                 li.replaceWith(p);
                             }
-                            
+
                             const newRange = document.createRange();
                             newRange.setStart(p, 0);
                             newRange.collapse(true);
@@ -577,13 +604,13 @@ export const Editor: React.FC<EditorProps> = ({
                             newLi.className = 'checklist-item';
                             newLi.style.cssText = 'list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;';
                             newLi.innerHTML = `<input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;"><span><br></span>`;
-                            
+
                             if (li.nextSibling) {
                                 li.parentNode?.insertBefore(newLi, li.nextSibling);
                             } else {
                                 li.parentNode?.appendChild(newLi);
                             }
-                            
+
                             const newSpan = newLi.querySelector('span');
                             if (newSpan) {
                                 const newRange = document.createRange();
@@ -598,18 +625,18 @@ export const Editor: React.FC<EditorProps> = ({
                     }
                 }
             }
-            
+
             if (selection && selection.isCollapsed) {
-                 const node = selection.anchorNode;
-                 if (node && (node.textContent === '' || node.textContent === '\n')) {
-                     if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
-                         e.preventDefault();
-                         return;
-                     }
-                 }
+                const node = selection.anchorNode;
+                if (node && (node.textContent === '' || node.textContent === '\n')) {
+                    if (breakOutOfBlock('PRE') || breakOutOfBlock('BLOCKQUOTE')) {
+                        e.preventDefault();
+                        return;
+                    }
+                }
             }
         }
-        
+
         if (e.key === 'Backspace') {
             const selection = window.getSelection();
             if (selection && selection.isCollapsed) {
@@ -617,27 +644,27 @@ export const Editor: React.FC<EditorProps> = ({
                 while (li && li.nodeName !== 'LI' && li !== contentEditableRef.current) {
                     li = li.parentNode as HTMLElement;
                 }
-                
+
                 if (li && li.nodeName === 'LI' && li.querySelector('input[type="checkbox"]')) {
                     const range = selection.getRangeAt(0);
                     const span = li.querySelector('span');
                     const isAtStart = (range.startContainer === span && range.startOffset === 0) ||
-                                      (range.startContainer.parentNode === span && range.startOffset === 0);
+                        (range.startContainer.parentNode === span && range.startOffset === 0);
 
                     if (isAtStart) {
-                         e.preventDefault();
-                         const checkbox = li.querySelector('input[type="checkbox"]');
-                         if (checkbox) checkbox.remove();
-                         if (span) {
-                             while(span.firstChild) {
-                                 li.insertBefore(span.firstChild, span);
-                             }
-                             span.remove();
-                         }
-                         li.style.cssText = '';
-                         li.classList.remove('checklist-item');
-                         handleVisualInput();
-                         return;
+                        e.preventDefault();
+                        const checkbox = li.querySelector('input[type="checkbox"]');
+                        if (checkbox) checkbox.remove();
+                        if (span) {
+                            while (span.firstChild) {
+                                li.insertBefore(span.firstChild, span);
+                            }
+                            span.remove();
+                        }
+                        li.style.cssText = '';
+                        li.classList.remove('checklist-item');
+                        handleVisualInput();
+                        return;
                     }
                 }
             }
@@ -877,11 +904,17 @@ export const Editor: React.FC<EditorProps> = ({
                                 type="text"
                                 list="categories"
                                 value={category}
+                                // FIX: Case-insensitive matching logic
                                 onChange={(e) => {
                                     const val = e.target.value;
                                     setCategory(val);
+                                    
+                                    // Check for existing category (case-insensitive)
+                                    const match = availableCategories.find(c => c.toLowerCase() === val.trim().toLowerCase());
+                                    const finalVal = match || val;
+
                                     // Immediate save for Category
-                                    onChange({ category: val }, true);
+                                    onChange({ category: finalVal }, true);
                                 }}
                                 className="px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                             />
@@ -936,6 +969,10 @@ export const Editor: React.FC<EditorProps> = ({
                     <div
                         className={`h-full overflow-y-auto p-8 bg-white dark:bg-gray-900 ${viewMode === 'readOnly' || isTrashed ? 'cursor-default' : 'cursor-text'}`}
                         onClick={handleEditorClick}
+                        // NEW DRAG HANDLERS
+                        onDragOver={handleDragPrevent} 
+                        onDragEnter={handleDragPrevent}
+                        onDrop={handleDrop}
                     >
                         <div
                             ref={contentEditableRef}
