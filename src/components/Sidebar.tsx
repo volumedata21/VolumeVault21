@@ -17,7 +17,11 @@ interface SidebarProps {
   view: 'notes' | 'trash';
   onChangeView: (view: 'notes' | 'trash') => void;
   trashCount: number;
-  navigateToDashboard: () => void; 
+  navigateToDashboard: () => void;
+  
+  // NEW PROPS
+  searchTerm: string;
+  onSearch: (term: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -35,53 +39,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
   view,
   onChangeView,
   trashCount,
-  navigateToDashboard 
+  navigateToDashboard,
+  searchTerm, // Destructure
+  onSearch    // Destructure
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+  // REMOVED local searchTerm state
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [sortCriterion, setSortCriterion] = useState<'updatedAt' | 'title'>('updatedAt');
 
+  // FilteredNotes now mainly handles sorting, as search is already applied to 'notes' prop
   const filteredNotes = useMemo(() => {
     return notes
-      .filter((note) => {
-        const searchLower = searchTerm.toLowerCase();
-        return (
-          note.title.toLowerCase().includes(searchLower) || 
-          note.content.toLowerCase().includes(searchLower) ||
-          note.category.toLowerCase().includes(searchLower) ||
-          (note.tags && note.tags.some(tag => tag.toLowerCase().includes(searchLower)))
-        );
-      })
       .sort((a, b) => {
-          // 1. Sort by Pinned status first (Sidebar should also reflect pinned state)
           if (a.isPinned !== b.isPinned) {
               return a.isPinned ? -1 : 1;
           }
-          // 2. Then by criterion
           if (sortCriterion === 'title') {
               return a.title.localeCompare(b.title);
           }
           return b.updatedAt - a.updatedAt;
       });
-  }, [notes, searchTerm, sortCriterion]);
+  }, [notes, sortCriterion]); // Removed searchTerm dependency
 
-  const groupedNotes = useMemo(() => {
-    return filteredNotes.reduce((acc, note) => {
-      const category = note.category || 'Uncategorized';
-      if (!acc[category]) acc[category] = [];
-      acc[category].push(note);
-      return acc;
-    }, {} as Record<string, Note[]>);
+  const { groupedNotes, categoryDisplayNames } = useMemo(() => {
+    const groups: Record<string, Note[]> = {};
+    const names: Record<string, string> = {};
+
+    filteredNotes.forEach(note => {
+      const rawCategory = note.category || 'Uncategorized';
+      const key = rawCategory.toLowerCase();
+      
+      if (!groups[key]) {
+          groups[key] = [];
+          names[key] = rawCategory; 
+      }
+      groups[key].push(note);
+    });
+    
+    return { groupedNotes: groups, categoryDisplayNames: names };
   }, [filteredNotes]);
 
-  const sortedCategories = Object.keys(groupedNotes).sort();
+  const sortedCategories = Object.keys(groupedNotes).sort((a, b) => {
+      return categoryDisplayNames[a].localeCompare(categoryDisplayNames[b]);
+  });
 
-  const toggleCategory = (category: string) => {
+  const toggleCategory = (categoryKey: string) => {
     const newCollapsed = new Set(collapsedCategories);
-    if (newCollapsed.has(category)) {
-      newCollapsed.delete(category);
+    if (newCollapsed.has(categoryKey)) {
+      newCollapsed.delete(categoryKey);
     } else {
-      newCollapsed.add(category);
+      newCollapsed.add(categoryKey);
     }
     setCollapsedCategories(newCollapsed);
   };
@@ -95,7 +102,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const shouldShowExpand = collapsedCategories.size > 0;
-
   const isTrash = view === 'trash';
   
 
@@ -105,7 +111,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       md:relative md:translate-x-0
     `}>
-      {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
         <button 
             onClick={isTrash ? undefined : navigateToDashboard}
@@ -123,15 +128,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
       </div>
 
-      {/* Search & Actions */}
       <div className="p-4 space-y-3">
         <div className="relative">
           <Search className="absolute left-3 top-2.5 text-gray-500 dark:text-gray-400" size={16} />
           <input
             type="text"
             placeholder="Search..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={searchTerm} // Controlled by App.tsx
+            onChange={(e) => onSearch(e.target.value)} // Calls App.tsx handler
             className="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-600 text-gray-900 dark:text-gray-100 placeholder-gray-500"
             aria-label="Search"
           />
@@ -160,9 +164,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Note List */}
       <div className="flex-1 overflow-y-auto px-2">
-        {/* Dashboard Link */}
         {!isTrash && (
             <div className="p-2">
                 <button
@@ -192,7 +194,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <div className="space-y-4 pb-4">
             
-            {/* Sort & Collapse Controls */}
             <div className="flex justify-between items-center px-2 pt-2 pb-1 text-xs">
                 <select
                     value={sortCriterion}
@@ -211,27 +212,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
             </div>
             
-            {sortedCategories.map(category => (
-              <div key={category} className="space-y-1">
+            {sortedCategories.map(categoryKey => (
+              <div key={categoryKey} className="space-y-1">
                 <button
-                  onClick={() => toggleCategory(category)}
-                  className="w-full flex items-center gap-2 px-2 py-1 text-xs font-bold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 uppercase tracking-wider transition-colors"
+                  onClick={() => toggleCategory(categoryKey)}
+                  className="w-full flex items-center gap-2 px-2 py-1 text-xs font-bold text-blue-600 dark:text-sky-400 hover:text-blue-800 dark:hover:text-sky-200 uppercase tracking-wider transition-colors"
                 >
-                  {collapsedCategories.has(category) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                  {category} <span className="text-gray-400 font-normal">({groupedNotes[category].length})</span>
+                  {collapsedCategories.has(categoryKey) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                  {categoryDisplayNames[categoryKey]} <span className="text-gray-400 font-normal">({groupedNotes[categoryKey].length})</span>
                 </button>
                 
-                {!collapsedCategories.has(category) && (
-                  <ul className="space-y-0.5"> {/* FIX: Reduced from space-y-1 to 0.5 */}
-                    {groupedNotes[category].map(note => (
+                {!collapsedCategories.has(categoryKey) && (
+                  <ul className="space-y-0.5">
+                    {groupedNotes[categoryKey].map(note => (
                       <li key={note.id}>
                         <button
                           onClick={() => {
                             onSelectNote(note.id);
                             onCloseMobile(); 
                           }}
-                          // FIX: Reduced p-3 to py-2 px-3 for tighter vertical spacing
-                          className={`w-full text-left py-2 px-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 group relative ${
+                          className={`w-full text-left py-2 pl-8 pr-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 group relative ${
                             currentNoteId === note.id 
                             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
                             : 'text-gray-700 dark:text-gray-300'
@@ -241,7 +241,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <h3 className={`font-semibold text-sm truncate ${isTrash ? 'line-through text-gray-500' : ''}`}>
                               {note.title || 'Untitled'}
                             </h3>
-                            {/* FIX: Reduced margin-top from mt-1 to mt-0.5 */}
                             <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                               {new Date(note.updatedAt).toLocaleDateString()}
                             </p>
@@ -297,7 +296,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Footer / Settings */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 space-y-3">
         <div className="flex bg-gray-200 dark:bg-gray-800 rounded-lg p-1 text-xs font-medium">
              <button 
