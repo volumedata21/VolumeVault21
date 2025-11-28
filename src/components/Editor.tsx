@@ -805,7 +805,7 @@ export const Editor: React.FC<EditorProps> = ({
 
             {/* MOBILE FLOATING CONTROLS (Moved Save and Toggles to top right) */}
             {!isTrashed && (
-                 <div className="fixed top-2 right-2 z-40 md:hidden flex items-center gap-2">
+                 <div className="fixed top-3 right-2 z-40 md:hidden flex items-center gap-2">
                      {/* SAVE BUTTON */}
                      <button
                          onClick={handleManualSave}

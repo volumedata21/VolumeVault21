@@ -48,6 +48,19 @@ const fetchAllNotesFromServer = async (serverUrl?: string): Promise<Note[]> => {
     return response.json();
 };
 
+// NEW: Helper for hard deleting a note on the server
+const deleteFromServer = async (id: string, serverUrl?: string) => {
+    const url = getFullApiUrl(`api/notes/${id}`, serverUrl);
+
+    const response = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+        throw new Error(`Server delete failed: ${response.statusText}`);
+    }
+};
+
 
 export const noteService = {
   getAllNotes: async (serverUrl?: string): Promise<Note[]> => {
@@ -101,9 +114,6 @@ export const noteService = {
   saveNote: async (note: Note): Promise<Note> => {
     const updatedNote = { ...note, updatedAt: Date.now() };
     
-    // NOTE: saveToServer does not accept serverUrl here as it's meant for quick local saves
-    // The App component must ensure the current note has the latest serverUrl saved to its state 
-    // before calling this (or rely on sync to push the update). We leave this simple for local speed.
     try {
         // 1. PUSH to server first (triggers LWW comparison)
         const serverResponse = await saveToServer(updatedNote); 
@@ -185,14 +195,31 @@ export const noteService = {
   // Hard delete
   permanentlyDeleteNote: async (id: string): Promise<void> => {
     await del(id);
+    // NOTE: Hard delete via UI will only delete locally. Server will clean up on next sync/delete.
+    // However, if the App calls deleteFromServer(id) directly (which it doesn't currently), it works.
   },
 
-  emptyTrash: async (): Promise<void> => {
+  // FIX: Hard deletes all notes marked as trash both locally and on the server
+  emptyTrash: async (serverUrl?: string): Promise<void> => {
     const notes: Note[] = (await values()) || [];
     const trashIds = notes.filter(n => n.deleted).map(n => n.id);
-    for (const id of trashIds) {
+    
+    const deletePromises = trashIds.map(async (id) => {
+      // 1. Delete locally from IndexedDB
       await del(id);
-    }
+      
+      // 2. NEW: Delete permanently from the server
+      try {
+          // Pass URL if available (though usually called via sync/app load which relies on current URL)
+          await deleteFromServer(id, serverUrl);
+          console.log(`[SYNC] Successfully hard-deleted note ID: ${id} from server.`);
+      } catch (e) {
+          console.error(`[SYNC] Failed to hard-delete note ID: ${id} from server.`, e);
+          // Continue despite error to ensure all local trash is emptied.
+      }
+    });
+
+    await Promise.all(deletePromises);
   },
 
   importNotes: async (fileContent: string): Promise<boolean> => {
