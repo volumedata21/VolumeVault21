@@ -27,6 +27,36 @@ export default defineConfig({
             purpose: 'any maskable'
           }
         ]
+      },
+      // NEW: Workbox configuration for Caching Strategy
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        runtimeCaching: [
+          {
+            // Cache Google Fonts (used in index.html)
+            urlPattern: /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-cache',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60 * 24 * 365 // 1 year
+              },
+            },
+          },
+          // Cache all other static assets (e.g., Lucide icons, any other CDN files)
+          {
+            urlPattern: /.*/i,
+            handler: 'NetworkFirst',
+            options: {
+                cacheName: 'runtime-cache',
+                expiration: {
+                    maxEntries: 30,
+                    maxAgeSeconds: 60 * 60 * 24 // 24 hours
+                }
+            }
+          }
+        ]
       }
     })
   ],
