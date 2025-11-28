@@ -17,7 +17,7 @@ interface SidebarProps {
   view: 'notes' | 'trash';
   onChangeView: (view: 'notes' | 'trash') => void;
   trashCount: number;
-  navigateToDashboard: () => void; // Prop from App.tsx
+  navigateToDashboard: () => void; 
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -35,11 +35,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   view,
   onChangeView,
   trashCount,
-  navigateToDashboard // Destructure the prop
+  navigateToDashboard 
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
-  // State: Sort criterion
   const [sortCriterion, setSortCriterion] = useState<'updatedAt' | 'title'>('updatedAt');
 
   const filteredNotes = useMemo(() => {
@@ -54,15 +53,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         );
       })
       .sort((a, b) => {
+          // 1. Sort by Pinned status first (Sidebar should also reflect pinned state)
+          if (a.isPinned !== b.isPinned) {
+              return a.isPinned ? -1 : 1;
+          }
+          // 2. Then by criterion
           if (sortCriterion === 'title') {
               return a.title.localeCompare(b.title);
           }
-          // Default or 'updatedAt'
           return b.updatedAt - a.updatedAt;
       });
   }, [notes, searchTerm, sortCriterion]);
 
-  // Group by category
   const groupedNotes = useMemo(() => {
     return filteredNotes.reduce((acc, note) => {
       const category = note.category || 'Uncategorized';
@@ -84,7 +86,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCollapsedCategories(newCollapsed);
   };
   
-  // Handlers: Collapse/Expand All
   const collapseAll = () => {
     setCollapsedCategories(new Set(sortedCategories));
   };
@@ -93,7 +94,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCollapsedCategories(new Set());
   };
 
-  // NEW FIX: Determines if the button should display 'Expand All' (if any notes are collapsed)
   const shouldShowExpand = collapsedCategories.size > 0;
 
   const isTrash = view === 'trash';
@@ -107,7 +107,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     `}>
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
-        {/* Make title clickable to navigate to dashboard AND use hover:brightness-110 */}
         <button 
             onClick={isTrash ? undefined : navigateToDashboard}
             className={`
@@ -177,7 +176,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             : 'text-gray-700 dark:text-gray-300'
                     }`}
                 >
-                    {/* Using AppWindow icon */}
                     <AppWindow size={20} /> Dashboard
                 </button>
             </div>
@@ -206,11 +204,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </select>
 
                 <button
-                    // FIX: Click handler and text logic based on shouldShowExpand
                     onClick={shouldShowExpand ? expandAll : collapseAll}
                     className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                 >
-                    {/* If any category is collapsed, offer to EXPAND ALL */}
                     {shouldShowExpand ? 'Expand All' : 'Collapse All'}
                 </button>
             </div>
@@ -226,16 +222,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
                 
                 {!collapsedCategories.has(category) && (
-                  <ul className="space-y-1">
+                  <ul className="space-y-0.5"> {/* FIX: Reduced from space-y-1 to 0.5 */}
                     {groupedNotes[category].map(note => (
                       <li key={note.id}>
                         <button
-                          // FIX: Call onSelectNote and close sidebar
                           onClick={() => {
                             onSelectNote(note.id);
                             onCloseMobile(); 
                           }}
-                          className={`w-full text-left p-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 group relative ${
+                          // FIX: Reduced p-3 to py-2 px-3 for tighter vertical spacing
+                          className={`w-full text-left py-2 px-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 group relative ${
                             currentNoteId === note.id 
                             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
                             : 'text-gray-700 dark:text-gray-300'
@@ -245,12 +241,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <h3 className={`font-semibold text-sm truncate ${isTrash ? 'line-through text-gray-500' : ''}`}>
                               {note.title || 'Untitled'}
                             </h3>
-                            <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 truncate">
+                            {/* FIX: Reduced margin-top from mt-1 to mt-0.5 */}
+                            <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                               {new Date(note.updatedAt).toLocaleDateString()}
                             </p>
                           </div>
                           
-                          {/* FIX: Force visibility on non-desktop screens */}
                           <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:md:opacity-100 transition-opacity">
                              {!isTrash ? (
                                 <div 
@@ -303,7 +299,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Footer / Settings */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 space-y-3">
-        {/* View Toggles */}
         <div className="flex bg-gray-200 dark:bg-gray-800 rounded-lg p-1 text-xs font-medium">
              <button 
                 onClick={() => onChangeView('notes')}

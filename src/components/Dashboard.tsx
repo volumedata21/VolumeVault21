@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Note } from '../types';
-import { Plus } from 'lucide-react';
+import { Plus, Pin } from 'lucide-react';
 // @ts-ignore
 import { marked } from 'marked';
 
@@ -8,24 +8,28 @@ interface DashboardProps {
   notes: Note[];
   onSelectNote: (id: string) => void;
   onCreateNote: () => void;
+  onPinNote: (id: string) => void;
 }
 
-// NEW: Helper function to decode HTML entities (e.g., converts &#39; back to ')
+// Helper to decode HTML entities (e.g., converts &#39; back to ')
 const decodeHTMLEntities = (text: string): string => {
-    // Uses a temporary DOM element (like a textarea) to leverage browser decoding
-    const textarea = document.createElement('textarea');
-    textarea.innerHTML = text;
-    return textarea.value;
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = text;
+        return textarea.value;
+    } catch (e) {
+        return text;
+    }
 };
-
 
 // Utility to detect the level of the leading heading (must be run on full HTML)
 const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
+    if (!html) return 0;
     const trimmedHtml = html.trim();
     if (trimmedHtml.startsWith('<h1>')) return 1;
     if (trimmedHtml.startsWith('<h2>')) return 2;
     if (trimmedHtml.startsWith('<h3>')) return 3;
-    return 0; // Not a leading heading
+    return 0; 
 };
 
 // Utility to strip HTML tags and preserve list/heading formatting for clean text block
@@ -34,10 +38,10 @@ const stripHtmlAndPreserveStructure = (html: string): string => {
 
   let processedHtml = html;
   
-  // 1. Remove Heading tags (Headings will be extracted/styled separately)
+  // 1. Remove Heading tags 
   processedHtml = processedHtml.replace(/<h[1-3][^>]*>(.*?)<\/h[1-3]>/gi, '$1\n'); 
 
-  // 2. Pre-process checklist items (handle the span content)
+  // 2. Pre-process checklist items 
   processedHtml = processedHtml.replace(/<li[^>]*>\s*<input type="checkbox"[^>]*checked[^>]*>\s*<span[^>]*>(.*?)<\/span><\/li>/gi, '\n[x] $1');
   processedHtml = processedHtml.replace(/<li[^>]*>\s*<input type="checkbox"[^>]*>\s*<span[^>]*>(.*?)<\/span><\/li>/gi, '\n[ ] $1');
   
@@ -47,7 +51,7 @@ const stripHtmlAndPreserveStructure = (html: string): string => {
   // 4. Convert HTML entities and remove remaining tags
   const text = processedHtml.replace(/<[^>]+>/g, '');
   
-  // CRITICAL FIX: Decode entities before returning the clean text
+  // FIX: Decode entities (fixes Ja&#39;maar issue)
   return decodeHTMLEntities(text).trim();
 };
 
@@ -55,6 +59,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   notes,
   onSelectNote,
   onCreateNote,
+  onPinNote,
 }) => {
 
   const activeNotes = notes.filter(n => !n.deleted);
@@ -62,41 +67,56 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Helper to apply differentiated classes based on heading level
   const getHeadingClasses = (level: 0 | 1 | 2 | 3): string => {
-    // FIX: Increased font size and weight for better pop and hierarchy
     if (level === 1) return 'font-black text-xl text-gray-900 dark:text-gray-50'; 
     if (level === 2) return 'font-extrabold text-lg text-gray-800 dark:text-gray-100';      
     if (level === 3) return 'font-semibold text-base text-gray-800 dark:text-gray-200'; 
     return 'font-normal text-gray-600 dark:text-gray-400'; 
   };
 
-  // Memoize the prepared notes to avoid recalculating HTML/snippets on every render
   const preparedNotes = useMemo(() => {
     return activeNotes.map(note => {
-      // 1. Convert Markdown to HTML
-      const htmlContent = marked.parse(note.content) as string;
+      // CRITICAL FIX: Handle missing/undefined content safely to prevent crash
+      const safeContent = note.content || ''; 
       
-      // 2. Get the full clean text with structure markers
+      let htmlContent = '';
+      try {
+          htmlContent = marked.parse(safeContent) as string;
+      } catch (e) {
+          console.error('Failed to parse markdown for note:', note.id);
+          htmlContent = '<i>Error parsing note content</i>';
+      }
+      
       const fullCleanText = stripHtmlAndPreserveStructure(htmlContent);
       
-      // 3. Split the text into the first line (potential heading) and the body
       const lines = fullCleanText.trim().split('\n').filter(line => line.trim() !== '');
-      
       const headingLevel = getLeadingHeadingLevel(htmlContent);
       
-      // The snippet we show is the first line + a small segment of the rest
       const firstLine = lines[0] || '';
-      // Join the next few lines for context preview
-      const bodySnippet = lines.slice(1, 4).join('\n'); // Show up to 3 lines of body
+      const bodySnippet = lines.slice(1, 4).join('\n'); 
 
       return {
         ...note,
         headingLine: headingLevel > 0 ? firstLine : '',
-        bodySnippet: headingLevel > 0 ? bodySnippet : firstLine + '\n' + lines.slice(1, 3).join('\n'), // If no heading, first line is part of body
+        bodySnippet: headingLevel > 0 ? bodySnippet : firstLine + '\n' + lines.slice(1, 3).join('\n'),
         headingLevel
       };
     });
   }, [activeNotes]);
 
+
+  // Helper to safely format date
+  const formatDate = (timestamp: number) => {
+      try {
+          if (!timestamp) return 'Unknown date';
+          return new Date(timestamp).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+          });
+      } catch (e) {
+          return 'Invalid date';
+      }
+  };
 
   return (
     <div className="p-4 md:p-8 h-full">
@@ -104,44 +124,52 @@ export const Dashboard: React.FC<DashboardProps> = ({
         Your Notes ({totalNotes})
       </h2>
 
-      {/* Note Grid */}
       {totalNotes > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {preparedNotes.map(note => (
             <button
               key={note.id}
               onClick={() => onSelectNote(note.id)}
-              className="group flex flex-col p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 text-left border border-gray-200 dark:border-gray-700 h-full min-h-[150px]"
+              className="group flex flex-col p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 text-left border border-gray-200 dark:border-gray-700 h-full min-h-[150px] relative"
             >
-              {/* Note Title */}
+              <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${
+                  note.isPinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              }`}>
+                  <button
+                      onClick={(e) => {
+                          e.stopPropagation(); 
+                          onPinNote(note.id);
+                      }}
+                      className={`p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors ${
+                          note.isPinned ? 'text-blue-600 dark:text-sky-400' : 'text-gray-400 hover:text-blue-600 dark:hover:text-blue-400'
+                      }`}
+                      title={note.isPinned ? 'Unpin Note' : 'Pin Note'}
+                  >
+                      <Pin size={18} fill={note.isPinned ? 'currentColor' : 'none'} />
+                  </button>
+              </div>
+
               <h3 className="text-lg font-semibold truncate text-blue-600 dark:text-sky-400 mb-2">
                 {note.title || 'Untitled Note'}
               </h3>
               
-              {/* Heading Line (Only rendered if detected) */}
               {note.headingLevel > 0 && (
                 <div className={`flex-shrink-0 whitespace-pre-wrap ${getHeadingClasses(note.headingLevel)}`}>
                   {note.headingLine}
                 </div>
               )}
 
-              {/* Body Snippet (Standard text size/weight) */}
               <div className="text-sm text-gray-600 dark:text-gray-400 flex-1 overflow-hidden whitespace-pre-wrap pt-1">
                 {note.bodySnippet || 'No content preview.'}
               </div>
               
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
-                Updated: {new Date(note.updatedAt).toLocaleDateString(undefined, {
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric'
-                })}
+                Updated: {formatDate(note.updatedAt)}
               </p>
             </button>
           ))}
         </div>
       ) : (
-        /* Empty State */
         <div className="flex flex-col items-center justify-center h-96 border border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-10">
           <p className="text-gray-500 dark:text-gray-400 mb-4">
             You don't have any active notes yet.
@@ -155,7 +183,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* Floating Action Button (FAB) for Mobile Create */}
       <button
         onClick={onCreateNote}
         className="fixed bottom-4 right-4 z-40 md:hidden p-4 rounded-full bg-blue-600 text-white shadow-xl hover:bg-blue-700 transition-colors"
