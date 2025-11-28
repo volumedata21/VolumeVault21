@@ -453,6 +453,41 @@ export const Editor: React.FC<EditorProps> = ({
         }
     };
 
+    // =======================================================
+    // NEW: Drag and Drop Handlers
+    // =======================================================
+
+    const handleDragPrevent = (e: React.DragEvent) => {
+        // Prevent default browser behavior to allow dropping files
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    const handleDrop = async (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (viewMode !== 'edit' || isTrashed) return;
+
+        const files = e.dataTransfer.files;
+        if (files.length === 0) return;
+
+        const imageFile = Array.from(files).find(file => file.type.startsWith('image/'));
+
+        if (imageFile) {
+            // Create a synthetic object to mock the e.target.files structure
+            const syntheticEvent = {
+                target: { files: [imageFile] } as unknown as HTMLInputElement
+            } as React.ChangeEvent<HTMLInputElement>;
+            
+            // Try to focus editor before calling upload handler
+            contentEditableRef.current?.focus(); 
+            
+            // Call the existing image upload logic
+            await handleImageUpload(syntheticEvent);
+        }
+    };
+
 
     // Editor Interactivity
     const handleEditorClick = (e: React.MouseEvent) => {
@@ -768,14 +803,15 @@ export const Editor: React.FC<EditorProps> = ({
                 </div>
             )}
 
-            {/* MOBILE FLOATING CONTROLS (New block for controls) */}
+            {/* MOBILE FLOATING CONTROLS (Moved Save and Toggles to top right) */}
             {!isTrashed && (
                  <div className="fixed top-2 right-2 z-40 md:hidden flex items-center gap-2">
                      {/* SAVE BUTTON */}
                      <button
                          onClick={handleManualSave}
+                         // FIX: Use h-8 and px-3 to match the total height of the toggle container
                          className={`
-                             flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all
+                             flex items-center justify-center gap-2 px-3 h-8 rounded-lg text-sm font-bold transition-all
                              ${isDirty
                                  ? 'bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-800 hover:to-indigo-700 text-white shadow-md'
                                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 shadow-sm'
@@ -786,7 +822,8 @@ export const Editor: React.FC<EditorProps> = ({
                      </button>
                      
                      {/* VIEW MODE TOGGLES */}
-                     <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-lg flex items-center shadow-md">
+                     {/* FIX: Ensure the toggle container is aligned and sized correctly */}
+                     <div className="bg-gray-100 dark:bg-gray-800 p-1 h-8 rounded-lg flex items-center shadow-md">
                          <button
                              onClick={() => toggleViewMode('edit')}
                              className={`p-1.5 rounded-md transition-all ${viewMode === 'edit' ? 'bg-white dark:bg-gray-700 shadow text-blue-600 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700'}`}
@@ -847,7 +884,7 @@ export const Editor: React.FC<EditorProps> = ({
                         </div>
                     </div>
 
-                    {/* SAVE BUTTON AND VIEW TOGGLES ARE REMOVED FROM HERE FOR MOBILE */}
+                    {/* Desktop Controls (Hidden on Mobile) */}
                     {!isTrashed && (
                         <div className="hidden md:flex items-center gap-2 flex-shrink-0">
                             {/* SAVE BUTTON */}
@@ -953,6 +990,10 @@ export const Editor: React.FC<EditorProps> = ({
                     <div
                         className={`h-full overflow-y-auto p-8 bg-white dark:bg-gray-900 ${viewMode === 'readOnly' || isTrashed ? 'cursor-default' : 'cursor-text'}`}
                         onClick={handleEditorClick}
+                        // NEW DRAG HANDLERS
+                        onDragOver={handleDragPrevent} 
+                        onDragEnter={handleDragPrevent}
+                        onDrop={handleDrop}
                     >
                         <div
                             ref={contentEditableRef}
