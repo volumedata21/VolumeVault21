@@ -7,12 +7,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['pwa-512x512.png', 'pwa-192x192.png'], 
+      includeAssets: ['pwa-512x512.png', 'pwa-192x192.png'],
       manifest: {
         name: 'VolumeVault21',
         short_name: 'VolumeVault',
         description: 'A self-hosted Markdown note-taking application.',
-        theme_color: '#ffffff',
+        theme_color: '#1c3367',
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -24,11 +24,17 @@ export default defineConfig({
             src: 'pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            // FIX: Changed to 'any' so Android doesn't try to mask the transparent one
+            purpose: 'any' 
+          },
+          {
+            src: 'maskable-icon-512x512.png', // NEW: The solid square version
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable' // Android will use this and cut it to the system shape
           }
         ]
       },
-      // NEW: Workbox configuration for Caching Strategy
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         runtimeCaching: [
@@ -49,11 +55,11 @@ export default defineConfig({
             urlPattern: /.*/i,
             handler: 'NetworkFirst',
             options: {
-                cacheName: 'runtime-cache',
-                expiration: {
-                    maxEntries: 30,
-                    maxAgeSeconds: 60 * 60 * 24 // 24 hours
-                }
+              cacheName: 'runtime-cache',
+              expiration: {
+                maxEntries: 30,
+                maxAgeSeconds: 60 * 60 * 24 // 24 hours
+              }
             }
           }
         ]
@@ -64,17 +70,16 @@ export default defineConfig({
     port: 2100,
     host: true,
     hmr: {
-        clientPort: 2100
+      clientPort: 2100
     },
     watch: {
-        usePolling: true
+      usePolling: true
     },
-    // CRITICAL FIX: Proxy /api and /uploads traffic from Vite (2100) to Express (3000)
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        secure: false, 
+        secure: false,
       },
       '/uploads': {
         target: 'http://localhost:3000',
