@@ -4,7 +4,7 @@ import {
     Save, Check, Bold, Italic, Underline, Strikethrough, Heading1, Heading2,
     List, ListOrdered, Code, Quote, Tag, AlertOctagon,
     FileCode, Eye, CheckSquare, Image as ImageIcon, Lock, X, Trash2, RotateCcw,
-    Minus 
+    Minus, RemoveFormatting 
 } from 'lucide-react';
 // @ts-ignore
 import { marked } from 'marked';
@@ -228,6 +228,17 @@ export const Editor: React.FC<EditorProps> = ({
         if (viewMode === 'preview') {
             contentToSave = sourceTextareaRef.current?.value || '';
         } else {
+            // FIX: Sync Checkbox Attributes before saving
+            if (contentEditableRef.current) {
+                const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
+                checkboxes.forEach((cb: any) => {
+                    if (cb.checked) {
+                        cb.setAttribute('checked', 'true');
+                    } else {
+                        cb.removeAttribute('checked');
+                    }
+                });
+            }
             const html = contentEditableRef.current?.innerHTML || '';
             contentToSave = turndownService.turndown(html);
         }
@@ -241,6 +252,18 @@ export const Editor: React.FC<EditorProps> = ({
     const handleVisualInput = () => {
         if (isTrashed) return;
         if (contentEditableRef.current) {
+            // FIX: Sync Checkbox Attributes before reading HTML
+            // This ensures that when Turndown reads innerHTML, it sees checked="true"
+            // otherwise it only sees the initial state, ignoring user clicks.
+            const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach((cb: any) => {
+                if (cb.checked) {
+                    cb.setAttribute('checked', 'true');
+                } else {
+                    cb.removeAttribute('checked');
+                }
+            });
+
             const html = contentEditableRef.current.innerHTML;
             const md = turndownService.turndown(html);
             onChange({ content: md });
@@ -295,9 +318,11 @@ export const Editor: React.FC<EditorProps> = ({
             contentEditableRef.current.focus();
         }
         
-        // Handle Horizontal Rule command
+        // Handle Horizontal Rule and Remove Format commands
         if (command === 'insertHorizontalRule') {
             document.execCommand('insertHorizontalRule', false, undefined);
+        } else if (command === 'removeFormat') {
+            document.execCommand('removeFormat', false, undefined);
         } else {
             document.execCommand(command, false, value);
         }
@@ -415,6 +440,19 @@ export const Editor: React.FC<EditorProps> = ({
 
             contentEditableRef.current?.focus();
             document.execCommand('insertHTML', false, ' '); 
+            
+            // FIX: Sync Checkboxes here too
+            if (contentEditableRef.current) {
+                const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
+                checkboxes.forEach((cb: any) => {
+                    if (cb.checked) {
+                        cb.setAttribute('checked', 'true');
+                    } else {
+                        cb.removeAttribute('checked');
+                    }
+                });
+            }
+
             const currentMd = turndownService.turndown(contentEditableRef.current.innerHTML);
             const combinedMd = currentMd.trim() + '\n\n' + imageMarkdown; 
             onChange({ content: combinedMd });
@@ -740,7 +778,11 @@ export const Editor: React.FC<EditorProps> = ({
     };
 
     return (
-        <div className="h-full flex flex-col bg-white dark:bg-gray-900 relative">
+        <div 
+            className="h-full flex flex-col bg-white dark:bg-gray-900 relative"
+            // NEW: Apply background color if present
+            style={{ backgroundColor: note.color || undefined }}
+        >
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
 
             {/* TRASH BANNER */}
@@ -904,17 +946,11 @@ export const Editor: React.FC<EditorProps> = ({
                                 type="text"
                                 list="categories"
                                 value={category}
-                                // FIX: Case-insensitive matching logic
                                 onChange={(e) => {
                                     const val = e.target.value;
                                     setCategory(val);
-                                    
-                                    // Check for existing category (case-insensitive)
-                                    const match = availableCategories.find(c => c.toLowerCase() === val.trim().toLowerCase());
-                                    const finalVal = match || val;
-
                                     // Immediate save for Category
-                                    onChange({ category: finalVal }, true);
+                                    onChange({ category: val }, true);
                                 }}
                                 className="px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                             />
@@ -946,6 +982,9 @@ export const Editor: React.FC<EditorProps> = ({
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', 'blockquote')}><Quote size={18} /></button>
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('formatBlock', '<pre>')}><Code size={18} /></button>
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('insertHorizontalRule')} title="Insert Horizontal Rule"><Minus size={18} /></button>
+                    {/* NEW: Remove Format Button */}
+                    <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('removeFormat')} title="Clear Formatting"><RemoveFormatting size={18} /></button>
+                    
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => {
                         const sel = window.getSelection();
                         if (sel && sel.rangeCount > 0) savedSelection.current = sel.getRangeAt(0);
