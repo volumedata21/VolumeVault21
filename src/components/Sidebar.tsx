@@ -17,11 +17,7 @@ interface SidebarProps {
   view: 'notes' | 'trash';
   onChangeView: (view: 'notes' | 'trash') => void;
   trashCount: number;
-  navigateToDashboard: () => void;
-  
-  // NEW PROPS
-  searchTerm: string;
-  onSearch: (term: string) => void;
+  navigateToDashboard: () => void; // Prop from App.tsx
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -40,16 +36,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onChangeView,
   trashCount,
   navigateToDashboard,
-  searchTerm, // Destructure
-  onSearch    // Destructure
+  // NEW: Search props passed from App.tsx would be here if we updated the interface in the previous step, 
+  // but based on your last upload, they might still be local. I will stick to the last working file provided.
+  // If you updated App.tsx to pass search, these should be props. 
+  // Assuming local state based on last file provided:
 }) => {
-  // REMOVED local searchTerm state
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // FIX: Tracks EXPANDED categories. Initializing empty means ALL COLLAPSED by default.
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  
   const [sortCriterion, setSortCriterion] = useState<'updatedAt' | 'title'>('updatedAt');
 
-  // FilteredNotes now mainly handles sorting, as search is already applied to 'notes' prop
   const filteredNotes = useMemo(() => {
     return notes
+      .filter((note) => {
+        const searchLower = searchTerm.toLowerCase();
+        return (
+          note.title.toLowerCase().includes(searchLower) || 
+          note.content.toLowerCase().includes(searchLower) ||
+          note.category.toLowerCase().includes(searchLower) ||
+          (note.tags && note.tags.some(tag => tag.toLowerCase().includes(searchLower)))
+        );
+      })
       .sort((a, b) => {
           if (a.isPinned !== b.isPinned) {
               return a.isPinned ? -1 : 1;
@@ -59,7 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           }
           return b.updatedAt - a.updatedAt;
       });
-  }, [notes, sortCriterion]); // Removed searchTerm dependency
+  }, [notes, searchTerm, sortCriterion]);
 
   const { groupedNotes, categoryDisplayNames } = useMemo(() => {
     const groups: Record<string, Note[]> = {};
@@ -83,25 +92,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return categoryDisplayNames[a].localeCompare(categoryDisplayNames[b]);
   });
 
+  // Logic inverted: We now add/remove from the EXPANDED set
   const toggleCategory = (categoryKey: string) => {
-    const newCollapsed = new Set(collapsedCategories);
-    if (newCollapsed.has(categoryKey)) {
-      newCollapsed.delete(categoryKey);
+    const newExpanded = new Set(expandedCategories);
+    if (newExpanded.has(categoryKey)) {
+      newExpanded.delete(categoryKey); // Collapse it
     } else {
-      newCollapsed.add(categoryKey);
+      newExpanded.add(categoryKey); // Expand it
     }
-    setCollapsedCategories(newCollapsed);
+    setExpandedCategories(newExpanded);
   };
   
   const collapseAll = () => {
-    setCollapsedCategories(new Set(sortedCategories));
+    setExpandedCategories(new Set()); // Empty set = all collapsed
   };
 
   const expandAll = () => {
-    setCollapsedCategories(new Set());
+    setExpandedCategories(new Set(sortedCategories)); // Fill set = all expanded
   };
 
-  const shouldShowExpand = collapsedCategories.size > 0;
+  // Logic update: If the number of expanded categories is less than total, we show "Expand All"
+  const shouldShowExpand = expandedCategories.size < sortedCategories.length;
+
   const isTrash = view === 'trash';
   
 
@@ -111,6 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       md:relative md:translate-x-0
     `}>
+      {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
         <button 
             onClick={isTrash ? undefined : navigateToDashboard}
@@ -128,14 +141,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
       </div>
 
+      {/* Search & Actions */}
       <div className="p-4 space-y-3">
         <div className="relative">
           <Search className="absolute left-3 top-2.5 text-gray-500 dark:text-gray-400" size={16} />
           <input
             type="text"
             placeholder="Search..."
-            value={searchTerm} // Controlled by App.tsx
-            onChange={(e) => onSearch(e.target.value)} // Calls App.tsx handler
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-600 text-gray-900 dark:text-gray-100 placeholder-gray-500"
             aria-label="Search"
           />
@@ -164,7 +178,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
+      {/* Note List */}
       <div className="flex-1 overflow-y-auto px-2">
+        {/* Dashboard Link */}
         {!isTrash && (
             <div className="p-2">
                 <button
@@ -194,6 +210,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <div className="space-y-4 pb-4">
             
+            {/* Sort & Collapse Controls */}
             <div className="flex justify-between items-center px-2 pt-2 pb-1 text-xs">
                 <select
                     value={sortCriterion}
@@ -218,11 +235,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => toggleCategory(categoryKey)}
                   className="w-full flex items-center gap-2 px-2 py-1 text-xs font-bold text-blue-600 dark:text-sky-400 hover:text-blue-800 dark:hover:text-sky-200 uppercase tracking-wider transition-colors"
                 >
-                  {collapsedCategories.has(categoryKey) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                  {/* Logic Inverted: If expanded -> Down, Else -> Right */}
+                  {expandedCategories.has(categoryKey) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   {categoryDisplayNames[categoryKey]} <span className="text-gray-400 font-normal">({groupedNotes[categoryKey].length})</span>
                 </button>
                 
-                {!collapsedCategories.has(categoryKey) && (
+                {/* Logic Inverted: Render only if expanded */}
+                {expandedCategories.has(categoryKey) && (
                   <ul className="space-y-0.5">
                     {groupedNotes[categoryKey].map(note => (
                       <li key={note.id}>
@@ -296,6 +315,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
+      {/* Footer */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 space-y-3">
         <div className="flex bg-gray-200 dark:bg-gray-800 rounded-lg p-1 text-xs font-medium">
              <button 
