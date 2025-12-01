@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Note } from '../types';
-import { Plus, Pin, MoreVertical, Copy, Trash2, Palette, Folder, Tag, Check, CircleOff } from 'lucide-react';
+import { Plus, Triangle, MoreVertical, Copy, Trash2, Palette, Folder, Tag, Check, CircleOff } from 'lucide-react';
 // @ts-ignore
 import { marked } from 'marked';
 
@@ -51,12 +51,140 @@ const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
 const stripHtmlAndPreserveStructure = (html: string): string => {
   if (!html) return '';
   let processedHtml = html;
-  processedHtml = processedHtml.replace(/<h[1-3][^>]*>(.*?)<\/h[1-3]>/gi, '$1\n'); 
-  processedHtml = processedHtml.replace(/<li[^>]*>\s*<input type="checkbox"[^>]*checked[^>]*>\s*<span[^>]*>(.*?)<\/span><\/li>/gi, '\n[x] $1');
-  processedHtml = processedHtml.replace(/<li[^>]*>\s*<input type="checkbox"[^>]*>\s*<span[^>]*>(.*?)<\/span><\/li>/gi, '\n[ ] $1');
-  processedHtml = processedHtml.replace(/<li[^>]*>/gi, '\n• ');
-  const text = processedHtml.replace(/<[^>]+>/g, '');
-  return decodeHTMLEntities(text).trim();
+  
+  // 1. Handle Lists 
+  processedHtml = processedHtml.replace(/<li[^>]*>\s*<input type="checkbox"[^>]*checked[^>]*>\s*<span[^>]*>(.*?)<\/span><\/li>/gi, '[x] $1<br>');
+  processedHtml = processedHtml.replace(/<li[^>]*>\s*<input type="checkbox"[^>]*>\s*<span[^>]*>(.*?)<\/span><\/li>/gi, '[ ] $1<br>');
+  processedHtml = processedHtml.replace(/<li[^>]*>/gi, '&bull; ');
+  
+  // 2. Handle Blocks
+  processedHtml = processedHtml.replace(/<\/p>/gi, '<br>');
+  processedHtml = processedHtml.replace(/<\/div>/gi, '<br>');
+  processedHtml = processedHtml.replace(/<\/h[1-6]>/gi, '<br>');
+  processedHtml = processedHtml.replace(/<\/li>/gi, '<br>');
+  
+  // 3. Handle HRs
+  processedHtml = processedHtml.replace(/<hr\s*\/?>/gi, '<hr class="my-2 border-t border-gray-300 dark:border-gray-600" />');
+
+  // 4. Remove Heading Open Tags
+  processedHtml = processedHtml.replace(/<h[1-6][^>]*>/gi, '');
+
+  // 5. STRIP: Whitelist allowed tags
+  const allowedTags = 'b|strong|i|em|u|s|strike|del|br|hr|a|pre|code|blockquote';
+  const stripRegex = new RegExp(`<(?!\/?(${allowedTags})\\b)[^>]+>`, 'gi');
+  processedHtml = processedHtml.replace(stripRegex, '');
+  
+  return processedHtml.trim();
+};
+
+// Utility: DOMParser-based stripper
+const processNoteContent = (html: string) => {
+  if (!html) return { imageUrl: null, headingLevel: 0, headingLine: '', bodyPreview: '' };
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  
+  const img = doc.querySelector('img');
+  const imageUrl = img ? img.getAttribute('src') : null;
+  
+  let contentStartNode = doc.body.firstChild;
+  while (contentStartNode && (
+      (contentStartNode.nodeType !== Node.ELEMENT_NODE && !contentStartNode.textContent?.trim()) || 
+      (contentStartNode.nodeName === 'IMG')
+  )) {
+      contentStartNode = contentStartNode.nextSibling;
+  }
+
+  let headingLevel: 0 | 1 | 2 | 3 = 0;
+  let headingLine = '';
+  
+  if (contentStartNode && ['H1', 'H2', 'H3'].includes(contentStartNode.nodeName)) {
+      headingLevel = parseInt(contentStartNode.nodeName.substring(1)) as 1|2|3;
+      headingLine = contentStartNode.textContent || '';
+      contentStartNode = contentStartNode.nextSibling;
+  }
+
+  let bodyPreview = '';
+  
+  const walk = (node: Node) => {
+      if (!node) return;
+      if (node.nodeName === 'IMG') return;
+
+      if (node.nodeType === Node.TEXT_NODE) {
+          const text = node.textContent || '';
+          bodyPreview += text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+          const el = node as HTMLElement;
+          const tagName = el.tagName.toLowerCase();
+          
+          if (['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del', 'code', 'pre', 'blockquote'].includes(tagName)) {
+              bodyPreview += `<${tagName}>`;
+              el.childNodes.forEach(walk);
+              bodyPreview += `</${tagName}>`;
+              return;
+          }
+          
+          const isBlock = ['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName);
+          
+          const preventBreak = 
+              !bodyPreview || 
+              bodyPreview.endsWith('<br>') || 
+              /<blockquote>\s*$/i.test(bodyPreview) || 
+              /<\/blockquote>\s*$/i.test(bodyPreview) || 
+              /<pre>\s*$/i.test(bodyPreview) || 
+              /<\/pre>\s*$/i.test(bodyPreview);
+          
+          if (isBlock && !preventBreak) {
+              bodyPreview += '<br>';
+          }
+
+          if (tagName === 'ol') {
+              let idx = 1;
+              Array.from(el.children).forEach(child => {
+                  if (child.nodeName === 'LI') {
+                       if (bodyPreview && !bodyPreview.endsWith('<br>') && !/<blockquote>\s*$/i.test(bodyPreview)) bodyPreview += '<br>';
+                       bodyPreview += `<span class="text-gray-900 dark:text-gray-200 font-medium">${idx}.</span> `;
+                       child.childNodes.forEach(walk);
+                       idx++;
+                  }
+              });
+              return;
+          }
+          if (tagName === 'ul') {
+               Array.from(el.children).forEach(child => {
+                  if (child.nodeName === 'LI') {
+                       if (bodyPreview && !bodyPreview.endsWith('<br>') && !/<blockquote>\s*$/i.test(bodyPreview)) bodyPreview += '<br>';
+                       const checkbox = child.querySelector('input[type="checkbox"]');
+                       if (checkbox) {
+                           const checked = checkbox.hasAttribute('checked');
+                           bodyPreview += checked ? '<span class="font-bold text-blue-600 dark:text-blue-400">▣</span> ' : '<span class="text-gray-400 dark:text-gray-500">▢</span> ';
+                           child.childNodes.forEach(c => { if (c.nodeName !== 'INPUT') walk(c); });
+                       } else {
+                           bodyPreview += '• ';
+                           child.childNodes.forEach(walk);
+                       }
+                  }
+              });
+              return;
+          }
+          
+          if (tagName === 'hr') {
+              bodyPreview += '<hr class="my-2 border-t border-gray-300 dark:border-gray-600" />';
+              return;
+          }
+          el.childNodes.forEach(walk);
+      }
+  };
+  
+  let currentNode = contentStartNode;
+  while (currentNode) {
+      walk(currentNode);
+      currentNode = currentNode.nextSibling;
+  }
+
+  bodyPreview = bodyPreview.replace(/(<br\s*\/?>)+$/i, '');
+
+  return { imageUrl, headingLevel, headingLine, bodyPreview };
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -112,16 +240,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let htmlContent = '';
       try { htmlContent = marked.parse(safeContent) as string; } catch (e) { htmlContent = '<i>Error</i>'; }
       
-      const fullCleanText = stripHtmlAndPreserveStructure(htmlContent);
-      const lines = fullCleanText.trim().split('\n').filter(line => line.trim() !== '');
-      const headingLevel = getLeadingHeadingLevel(htmlContent);
-      const firstLine = lines[0] || '';
-      const bodySnippet = lines.slice(1, 7).join('\n'); 
+      const { imageUrl, headingLevel, headingLine, bodyPreview } = processNoteContent(htmlContent);
+      
+      const lines = bodyPreview.split('<br>');
+      const bodySnippet = lines.slice(0, 5).join('<br>'); 
 
       return {
         ...note,
-        headingLine: headingLevel > 0 ? firstLine : '',
-        bodySnippet: headingLevel > 0 ? bodySnippet : firstLine + '\n' + lines.slice(1, 6).join('\n'),
+        imageUrl,
+        headingLine, 
+        bodySnippet,
         headingLevel
       };
     });
@@ -150,7 +278,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )}
       </h2>
 
-      {/* NOTE GRID */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-24">
           {preparedNotes.map(note => {
             const isSelected = selectedIds.has(note.id);
@@ -159,44 +286,52 @@ export const Dashboard: React.FC<DashboardProps> = ({
             return (
             <div
               key={note.id}
-              className={`group relative flex flex-col justify-between p-4 rounded-lg shadow-md transition-all duration-200 border border-gray-200 dark:border-gray-700 h-full min-h-[180px] ${isSelected ? 'ring-2 ring-blue-600 ring-offset-2 dark:ring-offset-gray-900' : 'hover:shadow-lg'}`}
+              className={`group relative flex flex-col justify-between rounded-lg shadow-md transition-all duration-200 border border-gray-200 dark:border-gray-700 h-full min-h-[180px] overflow-hidden ${isSelected ? 'ring-2 ring-blue-600 ring-offset-2 dark:ring-offset-gray-900' : 'hover:shadow-lg'}`}
               style={{ backgroundColor: note.color || undefined }}
               onClick={() => {
                   if (isSelectionMode) toggleSelection(note.id);
                   else onSelectNote(note.id);
               }}
             >
-              {/* Top Content Section */}
-              <div>
-                  {/* Pin Button */}
-                  <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${note.isPinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                      <button
-                          onClick={(e) => { e.stopPropagation(); onPinNote(note.id); }}
-                          className={`p-1 rounded-full hover:bg-black/10 transition-colors ${note.isPinned ? (isDark ? 'text-white' : 'text-blue-600') : (isDark ? 'text-white/50 hover:text-white' : 'text-gray-400 hover:text-blue-600')}`}
-                      >
-                          <Pin size={18} fill={note.isPinned ? 'currentColor' : 'none'} />
-                      </button>
-                  </div>
-
-                  <h3 className={`text-lg font-semibold truncate mb-2 pr-6 ${isDark ? 'text-white' : 'text-blue-600 dark:text-sky-400'}`}>
-                    {note.title || 'Untitled Note'}
-                  </h3>
-                  
-                  {note.headingLevel > 0 && (
-                    <div className={`flex-shrink-0 whitespace-pre-wrap ${getHeadingClasses(note.headingLevel, isDark)}`}>
-                      {note.headingLine}
-                    </div>
+              <div className="flex flex-col">
+                  {note.imageUrl && (
+                      <div className="w-full h-32 bg-gray-100 dark:bg-gray-700">
+                          <img src={note.imageUrl} alt="Cover" className="w-full h-full object-cover" loading="lazy" />
+                      </div>
                   )}
+                  
+                  <div className="p-4 pb-0"> 
+                      <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${note.isPinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                          <button
+                              onClick={(e) => { e.stopPropagation(); onPinNote(note.id); }}
+                              className={`p-1 rounded-full hover:bg-black/10 transition-colors ${note.isPinned ? (isDark ? 'text-white' : 'text-blue-600') : (isDark ? 'text-white/50 hover:text-white' : 'text-gray-400 hover:text-blue-600')}`}
+                              style={note.imageUrl ? { backgroundColor: 'rgba(255,255,255,0.8)' } : {}}
+                          >
+                              {/* FIX: Switched Pin to Triangle */}
+                              <Triangle size={18} fill={note.isPinned ? 'currentColor' : 'none'} />
+                          </button>
+                      </div>
 
-                  <div className={`text-sm flex-1 overflow-hidden whitespace-pre-wrap pt-1 ${isDark ? 'text-gray-200' : 'text-gray-600 dark:text-gray-400'}`}>
-                    {note.bodySnippet || 'No content preview.'}
+                      <h3 className={`text-lg font-semibold truncate mb-2 pr-6 ${isDark ? 'text-white' : 'text-blue-600 dark:text-sky-400'}`}>
+                        {note.title || 'Untitled Note'}
+                      </h3>
+                      
+                      {note.headingLevel > 0 && (
+                        <div 
+                            className={`flex-shrink-0 ${getHeadingClasses(note.headingLevel, isDark)}`}
+                            dangerouslySetInnerHTML={{ __html: note.headingLine }}
+                        />
+                      )}
+
+                      <div 
+                        className={`text-sm flex-1 overflow-hidden pt-1 line-clamp-6 ${isDark ? 'text-gray-200' : 'text-gray-600 dark:text-gray-400'} [&>pre]:bg-gray-200 [&>pre]:dark:bg-gray-800 [&>pre]:p-2 [&>pre]:rounded [&>pre]:font-mono [&>pre]:text-xs [&>pre]:my-2 [&>code]:font-mono [&>code]:bg-gray-200 [&>code]:dark:bg-gray-800 [&>code]:px-1 [&>code]:rounded [&>blockquote]:border-l-2 [&>blockquote]:border-gray-300 [&>blockquote]:dark:border-gray-600 [&>blockquote]:pl-2 [&>blockquote]:italic [&>blockquote]:my-1`}
+                        dangerouslySetInnerHTML={{ __html: note.bodySnippet || 'No content preview.' }}
+                      />
                   </div>
               </div>
               
-              {/* FOOTER: Flex container ensures vertical alignment */}
-              <div className="mt-4 flex items-center justify-between">
+              <div className="mt-4 flex items-center justify-between p-4 pt-0">
                   <div className="flex items-center gap-3">
-                      {/* FIX: Select Circle - Outline when not selected */}
                       <div 
                         className={`w-[18px] h-[18px] rounded-full flex items-center justify-center cursor-pointer transition-all border-2 ${
                             isSelected 
@@ -213,7 +348,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                   </div>
 
-                  {/* Menu Button */}
                   <div className={`transition-opacity ${activeMenuId === note.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                       <div className="relative">
                           <button
@@ -223,7 +357,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               <MoreVertical size={18} />
                           </button>
                           
-                          {/* Context Menu */}
                           {activeMenuId === note.id && (
                               <div className="absolute right-0 bottom-8 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-2 z-30 flex flex-col" onClick={(e) => e.stopPropagation()}>
                                   <div className="grid grid-cols-5 gap-1 px-3 mb-2 border-b border-gray-100 dark:border-gray-700 pb-2">
