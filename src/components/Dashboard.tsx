@@ -31,6 +31,16 @@ const NOTE_COLORS = [
   { name: 'Ocean', value: '#1F7A7A' },         
 ];
 
+// Helper to lighten a hex color by % (for border calculation)
+const lightenColor = (color: string, percent: number) => {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    return '#' + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
+};
+
 const decodeHTMLEntities = (text: string): string => {
     try {
         const textarea = document.createElement('textarea');
@@ -55,11 +65,9 @@ const processNoteContent = (html: string) => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
   
-  // 1. Extract Cover Image
   const img = doc.querySelector('img');
   const imageUrl = img ? img.getAttribute('src') : null;
   
-  // 2. Find First Text Content
   let contentStartNode = doc.body.firstChild;
   while (contentStartNode && (
       (contentStartNode.nodeType !== Node.ELEMENT_NODE && !contentStartNode.textContent?.trim()) || 
@@ -77,7 +85,6 @@ const processNoteContent = (html: string) => {
       contentStartNode = contentStartNode.nextSibling;
   }
 
-  // 3. Generate Body Preview
   let bodyPreview = '';
   
   const walk = (node: Node) => {
@@ -91,25 +98,13 @@ const processNoteContent = (html: string) => {
           const el = node as HTMLElement;
           const tagName = el.tagName.toLowerCase();
           
-          // Preserve Inline Formatting AND Links (a tag added)
-          if (['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del', 'code', 'pre', 'blockquote', 'a'].includes(tagName)) {
-              let attrs = '';
-              // Special handling for links: custom color, no underline, open new tab
-              if (tagName === 'a') {
-                  const href = el.getAttribute('href');
-                  if (href) {
-                      // FIX: Updated class to use specific hex color and remove underline
-                      attrs = ` href="${href}" target="_blank" rel="noopener noreferrer" class="text-[#788eb7] no-underline z-20 relative" onclick="event.stopPropagation()"`;
-                  }
-              }
-
-              bodyPreview += `<${tagName}${attrs}>`;
+          if (['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del', 'code', 'pre', 'blockquote'].includes(tagName)) {
+              bodyPreview += `<${tagName}>`;
               el.childNodes.forEach(walk);
               bodyPreview += `</${tagName}>`;
               return;
           }
           
-          // Handle Block Breaks
           const isBlock = ['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName);
           
           const preventBreak = 
@@ -124,7 +119,6 @@ const processNoteContent = (html: string) => {
               bodyPreview += '<br>';
           }
 
-          // Handle Ordered Lists
           if (tagName === 'ol') {
               let idx = 1;
               Array.from(el.children).forEach(child => {
@@ -137,12 +131,10 @@ const processNoteContent = (html: string) => {
               });
               return;
           }
-          // Handle Unordered Lists
           if (tagName === 'ul') {
                Array.from(el.children).forEach(child => {
                   if (child.nodeName === 'LI') {
                        if (bodyPreview && !bodyPreview.endsWith('<br>') && !/<blockquote>\s*$/i.test(bodyPreview)) bodyPreview += '<br>';
-                       
                        const checkbox = child.querySelector('input[type="checkbox"]');
                        if (checkbox) {
                            const checked = checkbox.hasAttribute('checked');
@@ -161,6 +153,19 @@ const processNoteContent = (html: string) => {
               bodyPreview += '<hr class="my-2 border-t border-gray-300 dark:border-gray-600" />';
               return;
           }
+          
+          // Handle Links
+          if (tagName === 'a') {
+              const href = el.getAttribute('href');
+              if (href) {
+                  const attrs = ` href="${href}" target="_blank" rel="noopener noreferrer" class="text-[#788eb7] no-underline z-20 relative" onclick="event.stopPropagation()"`;
+                  bodyPreview += `<a${attrs}>`;
+                  el.childNodes.forEach(walk);
+                  bodyPreview += `</a>`;
+                  return;
+              }
+          }
+
           el.childNodes.forEach(walk);
       }
   };
@@ -227,10 +232,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return activeNotes.map(note => {
       const safeContent = note.content || ''; 
       let htmlContent = '';
-      try { 
-          // Ensure breaks are enabled
-          htmlContent = marked.parse(safeContent, { breaks: true }) as string; 
-      } catch (e) { htmlContent = '<i>Error</i>'; }
+      try { htmlContent = marked.parse(safeContent, { breaks: true }) as string; } catch (e) { htmlContent = '<i>Error</i>'; }
       
       const { imageUrl, headingLevel, headingLine, bodyPreview } = processNoteContent(htmlContent);
       
@@ -275,11 +277,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
             const isSelected = selectedIds.has(note.id);
             const isDark = isDarkColor(note.color);
             
+            // Determine Border Color (5% lighter)
+            const borderColor = note.color 
+                ? lightenColor(note.color, 5) 
+                : undefined;
+
             return (
             <div
               key={note.id}
               className={`group relative flex flex-col justify-between rounded-lg shadow-md transition-all duration-200 border border-gray-200 dark:border-gray-700 h-full min-h-[180px] overflow-hidden ${isSelected ? 'ring-2 ring-blue-600 ring-offset-2 dark:ring-offset-gray-900' : 'hover:shadow-lg'}`}
-              style={{ backgroundColor: note.color || undefined }}
+              style={{ 
+                  // FIX: Gradient Background with 75% opacity (BF) on the color stop
+                  background: note.color ? `linear-gradient(to bottom, #121826, ${note.color}BF)` : undefined,
+                  backgroundColor: note.color ? undefined : undefined,
+                  borderColor: borderColor || undefined
+              }}
               onClick={() => {
                   if (isSelectionMode) toggleSelection(note.id);
                   else onSelectNote(note.id);
@@ -326,11 +338,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
               
               <div className="mt-4 flex items-center justify-between p-4 pt-0">
                   <div className="flex items-center gap-3">
+                      {/* FIX: White stroke for unselected circle if note has color */}
                       <div 
                         className={`w-[18px] h-[18px] rounded-full flex items-center justify-center cursor-pointer transition-all border-2 ${
                             isSelected 
                                 ? 'bg-blue-600 border-blue-600' 
-                                : 'bg-transparent border-gray-400 dark:border-gray-500 hover:border-blue-400'
+                                : (note.color 
+                                    ? 'bg-transparent border-white/80 hover:border-white' 
+                                    : 'bg-transparent border-gray-400 dark:border-gray-500 hover:border-blue-400')
                         }`}
                         onClick={(e) => { e.stopPropagation(); toggleSelection(note.id); }}
                       >
@@ -429,6 +444,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       )}
 
+      {/* ... Modals ... */}
       {showCategoryModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-sm shadow-xl">
