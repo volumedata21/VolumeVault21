@@ -48,35 +48,6 @@ const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
     return 0; 
 };
 
-const stripHtmlAndPreserveStructure = (html: string): string => {
-  if (!html) return '';
-  let processedHtml = html;
-  
-  // 1. Handle Lists 
-  processedHtml = processedHtml.replace(/<li[^>]*>\s*<input type="checkbox"[^>]*checked[^>]*>\s*<span[^>]*>(.*?)<\/span><\/li>/gi, '[x] $1<br>');
-  processedHtml = processedHtml.replace(/<li[^>]*>\s*<input type="checkbox"[^>]*>\s*<span[^>]*>(.*?)<\/span><\/li>/gi, '[ ] $1<br>');
-  processedHtml = processedHtml.replace(/<li[^>]*>/gi, '&bull; ');
-  
-  // 2. Handle Blocks
-  processedHtml = processedHtml.replace(/<\/p>/gi, '<br>');
-  processedHtml = processedHtml.replace(/<\/div>/gi, '<br>');
-  processedHtml = processedHtml.replace(/<\/h[1-6]>/gi, '<br>');
-  processedHtml = processedHtml.replace(/<\/li>/gi, '<br>');
-  
-  // 3. Handle HRs
-  processedHtml = processedHtml.replace(/<hr\s*\/?>/gi, '<hr class="my-2 border-t border-gray-300 dark:border-gray-600" />');
-
-  // 4. Remove Heading Open Tags
-  processedHtml = processedHtml.replace(/<h[1-6][^>]*>/gi, '');
-
-  // 5. STRIP: Whitelist allowed tags
-  const allowedTags = 'b|strong|i|em|u|s|strike|del|br|hr|a|pre|code|blockquote';
-  const stripRegex = new RegExp(`<(?!\/?(${allowedTags})\\b)[^>]+>`, 'gi');
-  processedHtml = processedHtml.replace(stripRegex, '');
-  
-  return processedHtml.trim();
-};
-
 // Utility: DOMParser-based stripper
 const processNoteContent = (html: string) => {
   if (!html) return { imageUrl: null, headingLevel: 0, headingLine: '', bodyPreview: '' };
@@ -84,9 +55,11 @@ const processNoteContent = (html: string) => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
   
+  // 1. Extract Cover Image
   const img = doc.querySelector('img');
   const imageUrl = img ? img.getAttribute('src') : null;
   
+  // 2. Find First Text Content
   let contentStartNode = doc.body.firstChild;
   while (contentStartNode && (
       (contentStartNode.nodeType !== Node.ELEMENT_NODE && !contentStartNode.textContent?.trim()) || 
@@ -104,6 +77,7 @@ const processNoteContent = (html: string) => {
       contentStartNode = contentStartNode.nextSibling;
   }
 
+  // 3. Generate Body Preview
   let bodyPreview = '';
   
   const walk = (node: Node) => {
@@ -117,13 +91,25 @@ const processNoteContent = (html: string) => {
           const el = node as HTMLElement;
           const tagName = el.tagName.toLowerCase();
           
-          if (['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del', 'code', 'pre', 'blockquote'].includes(tagName)) {
-              bodyPreview += `<${tagName}>`;
+          // Preserve Inline Formatting AND Links (a tag added)
+          if (['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del', 'code', 'pre', 'blockquote', 'a'].includes(tagName)) {
+              let attrs = '';
+              // Special handling for links: custom color, no underline, open new tab
+              if (tagName === 'a') {
+                  const href = el.getAttribute('href');
+                  if (href) {
+                      // FIX: Updated class to use specific hex color and remove underline
+                      attrs = ` href="${href}" target="_blank" rel="noopener noreferrer" class="text-[#788eb7] no-underline z-20 relative" onclick="event.stopPropagation()"`;
+                  }
+              }
+
+              bodyPreview += `<${tagName}${attrs}>`;
               el.childNodes.forEach(walk);
               bodyPreview += `</${tagName}>`;
               return;
           }
           
+          // Handle Block Breaks
           const isBlock = ['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName);
           
           const preventBreak = 
@@ -138,6 +124,7 @@ const processNoteContent = (html: string) => {
               bodyPreview += '<br>';
           }
 
+          // Handle Ordered Lists
           if (tagName === 'ol') {
               let idx = 1;
               Array.from(el.children).forEach(child => {
@@ -150,10 +137,12 @@ const processNoteContent = (html: string) => {
               });
               return;
           }
+          // Handle Unordered Lists
           if (tagName === 'ul') {
                Array.from(el.children).forEach(child => {
                   if (child.nodeName === 'LI') {
                        if (bodyPreview && !bodyPreview.endsWith('<br>') && !/<blockquote>\s*$/i.test(bodyPreview)) bodyPreview += '<br>';
+                       
                        const checkbox = child.querySelector('input[type="checkbox"]');
                        if (checkbox) {
                            const checked = checkbox.hasAttribute('checked');
@@ -238,7 +227,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return activeNotes.map(note => {
       const safeContent = note.content || ''; 
       let htmlContent = '';
-      try { htmlContent = marked.parse(safeContent) as string; } catch (e) { htmlContent = '<i>Error</i>'; }
+      try { 
+          // Ensure breaks are enabled
+          htmlContent = marked.parse(safeContent, { breaks: true }) as string; 
+      } catch (e) { htmlContent = '<i>Error</i>'; }
       
       const { imageUrl, headingLevel, headingLine, bodyPreview } = processNoteContent(htmlContent);
       
@@ -307,7 +299,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               className={`p-1 rounded-full hover:bg-black/10 transition-colors ${note.isPinned ? (isDark ? 'text-white' : 'text-blue-600') : (isDark ? 'text-white/50 hover:text-white' : 'text-gray-400 hover:text-blue-600')}`}
                               style={note.imageUrl ? { backgroundColor: 'rgba(255,255,255,0.8)' } : {}}
                           >
-                              {/* FIX: Switched Pin to Triangle */}
                               <Triangle size={18} fill={note.isPinned ? 'currentColor' : 'none'} />
                           </button>
                       </div>
@@ -324,7 +315,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       )}
 
                       <div 
-                        className={`text-sm flex-1 overflow-hidden pt-1 line-clamp-6 ${isDark ? 'text-gray-200' : 'text-gray-600 dark:text-gray-400'} [&>pre]:bg-gray-200 [&>pre]:dark:bg-gray-800 [&>pre]:p-2 [&>pre]:rounded [&>pre]:font-mono [&>pre]:text-xs [&>pre]:my-2 [&>code]:font-mono [&>code]:bg-gray-200 [&>code]:dark:bg-gray-800 [&>code]:px-1 [&>code]:rounded [&>blockquote]:border-l-2 [&>blockquote]:border-gray-300 [&>blockquote]:dark:border-gray-600 [&>blockquote]:pl-2 [&>blockquote]:italic [&>blockquote]:my-1`}
+                        className={`text-sm flex-1 overflow-hidden pt-1 line-clamp-6 ${isDark ? 'text-gray-200' : 'text-gray-600 dark:text-gray-400'} 
+                        [&>pre]:bg-gray-200 [&>pre]:dark:bg-gray-800 [&>pre]:p-2 [&>pre]:rounded [&>pre]:font-mono [&>pre]:text-xs [&>pre]:my-2 
+                        [&>code]:font-mono [&>code]:bg-gray-200 [&>code]:dark:bg-gray-800 [&>code]:px-1 [&>code]:rounded 
+                        [&>blockquote]:my-2 [&>blockquote]:border-l-2 [&>blockquote]:border-gray-300 [&>blockquote]:dark:border-gray-600 [&>blockquote]:pl-2 [&>blockquote]:italic [&>blockquote]:my-1`}
                         dangerouslySetInnerHTML={{ __html: note.bodySnippet || 'No content preview.' }}
                       />
                   </div>
@@ -388,7 +382,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           )})}
       </div>
 
-      {/* BULK ACTIONS BAR */}
       {isSelectionMode && (
           <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 rounded-full px-6 py-3 flex items-center gap-6 z-50">
               <span className="text-sm font-bold text-gray-500">{selectedIds.size} selected</span>
@@ -436,7 +429,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       )}
 
-      {/* MODALS (Category/Tags) */}
       {showCategoryModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-sm shadow-xl">

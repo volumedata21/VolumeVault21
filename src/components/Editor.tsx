@@ -4,7 +4,7 @@ import {
     Save, Check, Bold, Italic, Underline, Strikethrough, Heading1, Heading2,
     List, ListOrdered, Code, Quote, Tag, AlertOctagon,
     FileCode, Eye, CheckSquare, Image as ImageIcon, Lock, X, Trash2, RotateCcw,
-    Minus, RemoveFormatting 
+    Minus, RemoveFormatting, Link 
 } from 'lucide-react';
 // @ts-ignore
 import { marked } from 'marked';
@@ -13,12 +13,15 @@ import TurndownService from 'turndown';
 
 // Configure Marked globally
 const renderer = new marked.Renderer();
+
+// Override List Item to support checkboxes
 // @ts-ignore
 renderer.listitem = function (item: any) {
     let text = '';
     let task = false;
     let checked = false;
 
+    // Handle different marked versions/parameter structures
     if (typeof item === 'object' && item !== null && 'text' in item) {
         text = item.text;
         task = item.task || false;
@@ -33,7 +36,6 @@ renderer.listitem = function (item: any) {
 
     if (task) {
         const cleanText = text.replace(/^<input[^>]+>\s*/, '');
-
         return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
       <input type="checkbox" ${checked ? 'checked' : ''} style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
       <span style="flex: 1; min-width: 0; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${cleanText}</span>
@@ -41,7 +43,27 @@ renderer.listitem = function (item: any) {
     }
     return `<li>${text}</li>`;
 };
-marked.use({ renderer, gfm: true });
+
+// FIX: Override Link Renderer to force new tab
+// @ts-ignore
+renderer.link = function(href, title, text) {
+    // Handle object-style params if passed by newer marked versions
+    let cleanHref = href;
+    let cleanTitle = title;
+    let cleanText = text;
+    
+    if (typeof href === 'object') {
+        cleanHref = href.href;
+        cleanTitle = href.title;
+        cleanText = href.text;
+    }
+
+    const titleAttr = cleanTitle ? ` title="${cleanTitle}"` : '';
+    // Ensure target="_blank" is added
+    return `<a href="${cleanHref}"${titleAttr} target="_blank" rel="noopener noreferrer">${cleanText}</a>`;
+};
+
+marked.use({ renderer, gfm: true, breaks: true });
 
 interface EditorProps {
     note: Note;
@@ -71,10 +93,7 @@ export const Editor: React.FC<EditorProps> = ({
     const [tagInput, setTagInput] = useState('');
 
     const [isDirty, setIsDirty] = useState(false);
-    // Track content focus for mobile header collapse
     const [isContentFocused, setIsContentFocused] = useState(false);
-    
-    // Default to 'edit' as 'preview' (Markdown mode) is now disabled/removed
     const [viewMode, setViewMode] = useState<'edit' | 'preview' | 'readOnly'>('edit');
     const [editorContent, setEditorContent] = useState('');
 
@@ -91,6 +110,7 @@ export const Editor: React.FC<EditorProps> = ({
             headingStyle: 'atx',
             codeBlockStyle: 'fenced'
         });
+
         service.addRule('checklist', {
             filter: 'input',
             replacement: function (_content: any, node: any) {
@@ -100,6 +120,38 @@ export const Editor: React.FC<EditorProps> = ({
                 return '';
             }
         });
+
+        service.addRule('strikethrough', {
+            filter: ['del', 's', 'strike'],
+            replacement: function (content: string) {
+                return '~~' + content + '~~';
+            }
+        });
+        
+        service.addRule('fencedCodeBlock', {
+            filter: function (node: any, options: any) {
+                return (
+                    options.codeBlockStyle === 'fenced' &&
+                    node.nodeName === 'PRE'
+                );
+            },
+            replacement: function (content: string, node: any, options: any) {
+                const firstChild = node.firstChild;
+                let language = '';
+                if (firstChild && firstChild.nodeName === 'CODE') {
+                     const className = firstChild.getAttribute('class') || '';
+                     const match = className.match(/language-(\S+)/);
+                     if (match) language = match[1];
+                }
+                const text = node.textContent || '';
+                return (
+                    '\n\n' + options.fence + language + '\n' +
+                    text +
+                    '\n' + options.fence + '\n\n'
+                );
+            }
+        });
+
         service.addRule('image', {
             filter: 'img',
             replacement: function (_content: any, node: any) {
@@ -121,13 +173,12 @@ export const Editor: React.FC<EditorProps> = ({
         setCategory(note.category || 'General');
         setTags(note.tags || []);
         setIsDirty(false);
-        setIsContentFocused(false); // Reset focus state on note change
+        setIsContentFocused(false); 
 
-        // FIX: Safely handle missing content and parsing errors
         const safeContent = note.content || '';
         let html = '';
         try {
-            html = marked.parse(safeContent) as string;
+            html = marked.parse(safeContent, { breaks: true }) as string;
         } catch (e) {
             console.error('Error parsing markdown in Editor:', e);
             html = '<p>Error loading content.</p>';
@@ -224,11 +275,10 @@ export const Editor: React.FC<EditorProps> = ({
         if (isTrashed) return;
         let contentToSave = '';
 
-        // NOTE: Preview mode is effectively disabled, so this code should rarely run
         if (viewMode === 'preview') {
             contentToSave = sourceTextareaRef.current?.value || '';
         } else {
-            // FIX: Sync Checkbox Attributes before saving
+            // Sync Checkbox Attributes before saving
             if (contentEditableRef.current) {
                 const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach((cb: any) => {
@@ -252,9 +302,6 @@ export const Editor: React.FC<EditorProps> = ({
     const handleVisualInput = () => {
         if (isTrashed) return;
         if (contentEditableRef.current) {
-            // FIX: Sync Checkbox Attributes before reading HTML
-            // This ensures that when Turndown reads innerHTML, it sees checked="true"
-            // otherwise it only sees the initial state, ignoring user clicks.
             const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
             checkboxes.forEach((cb: any) => {
                 if (cb.checked) {
@@ -281,14 +328,12 @@ export const Editor: React.FC<EditorProps> = ({
     const toggleViewMode = (mode: 'edit' | 'preview' | 'readOnly') => {
         if (isTrashed && mode === 'edit') return;
 
-        // PERMANENT LOCK: Block access to the unstable Markdown view
         if (mode === 'preview') {
             alert("Markdown Source Code view is currently disabled due to instability and potential data loss.");
             return;
         }
 
         if (viewMode === 'preview' && mode !== 'preview') {
-            // This block should never be reached now, but handle exit safely
             const mdToParse = sourceTextareaRef.current?.value || note.content;
 
             if (mdToParse !== note.content) {
@@ -303,7 +348,6 @@ export const Editor: React.FC<EditorProps> = ({
                 attachCopyButtons();
             }
         } else if (viewMode !== 'preview' && mode === 'preview') {
-            // This block should never be reached
             const html = contentEditableRef.current?.innerHTML || '';
             const md = turndownService.turndown(html);
 
@@ -318,11 +362,15 @@ export const Editor: React.FC<EditorProps> = ({
             contentEditableRef.current.focus();
         }
         
-        // Handle Horizontal Rule and Remove Format commands
         if (command === 'insertHorizontalRule') {
             document.execCommand('insertHorizontalRule', false, undefined);
         } else if (command === 'removeFormat') {
             document.execCommand('removeFormat', false, undefined);
+        } else if (command === 'createLink') {
+            const url = prompt('Enter the link URL:');
+            if (url) {
+                document.execCommand('createLink', false, url);
+            }
         } else {
             document.execCommand(command, false, value);
         }
@@ -440,19 +488,6 @@ export const Editor: React.FC<EditorProps> = ({
 
             contentEditableRef.current?.focus();
             document.execCommand('insertHTML', false, ' '); 
-            
-            // FIX: Sync Checkboxes here too
-            if (contentEditableRef.current) {
-                const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
-                checkboxes.forEach((cb: any) => {
-                    if (cb.checked) {
-                        cb.setAttribute('checked', 'true');
-                    } else {
-                        cb.removeAttribute('checked');
-                    }
-                });
-            }
-
             const currentMd = turndownService.turndown(contentEditableRef.current.innerHTML);
             const combinedMd = currentMd.trim() + '\n\n' + imageMarkdown; 
             onChange({ content: combinedMd });
@@ -780,7 +815,7 @@ export const Editor: React.FC<EditorProps> = ({
     return (
         <div 
             className="h-full flex flex-col bg-white dark:bg-gray-900 relative"
-            // NEW: Apply background color if present
+            // Apply background color if present
             style={{ backgroundColor: note.color || undefined }}
         >
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
@@ -984,6 +1019,8 @@ export const Editor: React.FC<EditorProps> = ({
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('insertHorizontalRule')} title="Insert Horizontal Rule"><Minus size={18} /></button>
                     {/* NEW: Remove Format Button */}
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('removeFormat')} title="Clear Formatting"><RemoveFormatting size={18} /></button>
+                    {/* NEW: Link Button */}
+                    <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => execCmd('createLink')} title="Insert Link"><Link size={18} /></button>
                     
                     <button className={toolbarBtnClass} onMouseDown={onToolbarButtonDown} onClick={() => {
                         const sel = window.getSelection();
@@ -993,7 +1030,7 @@ export const Editor: React.FC<EditorProps> = ({
                 </div>
             )}
 
-            {/* EDITOR CONTENT */}
+            {/* EDITOR CONTENT - FIX: Added custom prose styling for links */}
             <div className="flex-1 overflow-hidden relative">
                 {viewMode === 'preview' ? (
                     <textarea
@@ -1024,6 +1061,7 @@ export const Editor: React.FC<EditorProps> = ({
                         prose prose-slate dark:prose-invert max-w-none focus:outline-none min-h-[50vh] 
                         prose-p:my-2 prose-headings:my-4 prose-img:rounded-lg prose-img:shadow-md
                         prose-img:max-h-[400px] prose-img:w-auto prose-img:max-w-full prose-img:object-contain
+                        prose-a:text-[#788eb7] prose-a:no-underline prose-a:font-normal prose-a:cursor-pointer
                         ${isPlaceholderContent && viewMode === 'edit' ? 'text-gray-300 dark:text-gray-600 italic' : ''}
                         ${viewMode === 'readOnly' || isTrashed ? 'select-text' : ''}
                     `}
