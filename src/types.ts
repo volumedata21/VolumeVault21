@@ -9,7 +9,7 @@ export interface Note {
   deleted?: boolean;
   deletedAt?: number;
   isPinned?: boolean;
-  color?: string; 
+  color?: string; // Hex color code
 }
 
 export type ViewMode = 'edit' | 'preview' | 'split';

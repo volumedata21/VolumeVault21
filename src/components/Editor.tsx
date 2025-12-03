@@ -21,7 +21,6 @@ renderer.listitem = function (item: any) {
     let task = false;
     let checked = false;
 
-    // Handle different marked versions/parameter structures
     if (typeof item === 'object' && item !== null && 'text' in item) {
         text = item.text;
         task = item.task || false;
@@ -44,10 +43,9 @@ renderer.listitem = function (item: any) {
     return `<li>${text}</li>`;
 };
 
-// FIX: Override Link Renderer to force new tab
+// Override Link Renderer to force new tab
 // @ts-ignore
 renderer.link = function(href, title, text) {
-    // Handle object-style params if passed by newer marked versions
     let cleanHref = href;
     let cleanTitle = title;
     let cleanText = text;
@@ -59,7 +57,6 @@ renderer.link = function(href, title, text) {
     }
 
     const titleAttr = cleanTitle ? ` title="${cleanTitle}"` : '';
-    // Ensure target="_blank" is added
     return `<a href="${cleanHref}"${titleAttr} target="_blank" rel="noopener noreferrer">${cleanText}</a>`;
 };
 
@@ -278,7 +275,6 @@ export const Editor: React.FC<EditorProps> = ({
         if (viewMode === 'preview') {
             contentToSave = sourceTextareaRef.current?.value || '';
         } else {
-            // Sync Checkbox Attributes before saving
             if (contentEditableRef.current) {
                 const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach((cb: any) => {
@@ -293,7 +289,6 @@ export const Editor: React.FC<EditorProps> = ({
             contentToSave = turndownService.turndown(html);
         }
 
-        // Force save to disk on manual save
         onChange({ title, category, tags, content: contentToSave }, true);
         onSave();
         setIsDirty(false);
@@ -430,7 +425,6 @@ export const Editor: React.FC<EditorProps> = ({
         handleVisualInput();
     };
 
-    // Tag Handling
     const addTag = () => {
         if (isTrashed) return;
         const cleanTag = tagInput.trim();
@@ -449,7 +443,6 @@ export const Editor: React.FC<EditorProps> = ({
         onChange({ tags: newTags }, true);
     };
 
-    // Image upload logic 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -815,8 +808,7 @@ export const Editor: React.FC<EditorProps> = ({
     return (
         <div 
             className="h-full flex flex-col bg-white dark:bg-gray-900 relative"
-            // Apply background color if present
-            style={{ backgroundColor: note.color || undefined }}
+            // FIX: Removed the style prop that applied background color
         >
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
 

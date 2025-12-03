@@ -46,14 +46,9 @@ export default function App() {
   const [sidebarView, setSidebarView] = useState<'notes' | 'trash'>('notes');
   const [loading, setLoading] = useState(true); 
   
-  // NEW: Centralized Search State
-  const [searchTerm, setSearchTerm] = useState('');
-
-  // Touch state
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [touchEndX, setTouchEndX] = useState<number | null>(null);
 
-  // Undo State
   const [undoAction, setUndoAction] = useState<{ label: string, handler: () => void } | null>(null);
   const [showUndoToast, setShowUndoToast] = useState(false);
   
@@ -74,6 +69,9 @@ export default function App() {
     }
   });
 
+  // NEW: Centralized Search State
+  const [searchTerm, setSearchTerm] = useState('');
+
   const getCurrentNote = () => notes.find(n => n.id === activeNoteId);
   
   const saveCurrentNoteToDisk = async () => {
@@ -85,7 +83,6 @@ export default function App() {
     }
   };
 
-  // --- UNDO SYSTEM HELPERS ---
   const triggerUndoToast = (label: string, undoHandler: () => void) => {
       setUndoAction({ label, handler: undoHandler });
       setShowUndoToast(true);
@@ -100,13 +97,13 @@ export default function App() {
       }
   };
 
-  // --- BULK & SINGLE ACTIONS ---
-
   const handlePinNote = (id: string) => {
     setNotes(prev => prev.map(note => {
         if (note.id === id) {
             const newPinnedState = !note.isPinned;
-            const updatedNote = { ...note, isPinned: newPinnedState };
+            const newColor = newPinnedState ? '#2f3d48' : note.color;
+            
+            const updatedNote = { ...note, isPinned: newPinnedState, color: newColor };
             
             noteService.saveNote(updatedNote, settings.serverUrl).catch(e => console.error(e));
             return updatedNote;
@@ -122,7 +119,8 @@ export default function App() {
           title: `${note.title} (Copy)`,
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          isPinned: false 
+          isPinned: false,
+          color: note.color
       };
       await noteService.saveNote(newNote, settings.serverUrl);
       setNotes(prev => [newNote, ...prev]);
@@ -205,10 +203,16 @@ export default function App() {
       });
   };
 
-  // --- NAVIGATION & ROUTING ---
+  // --- NAVIGATION & ROUTING (FIXED) ---
 
   const navigateToDashboard = useCallback(async () => {
-      await saveCurrentNoteToDisk();
+      // FIX: Catch error so navigation proceeds even if save fails
+      try {
+          await saveCurrentNoteToDisk();
+      } catch (e) {
+          console.error("Save failed during dashboard nav, proceeding anyway:", e);
+      }
+      
       if (window.location.pathname !== '/') {
         window.history.pushState(null, 'Dashboard', '/');
       }
@@ -221,6 +225,11 @@ export default function App() {
     try {
         const loadedNotes = await noteService.getAllNotes(settings.serverUrl); 
         setNotes(loadedNotes);
+        
+        if (activeNoteId && !loadedNotes.find(n => n.id === activeNoteId)) {
+             setActiveNoteId(null);
+             if (window.location.pathname !== '/') window.history.replaceState(null, 'Dashboard', '/');
+        }
     } catch (e) {
         console.error("[SYNC] Server load failed.", e);
         setActiveNoteId(null); 
@@ -261,7 +270,6 @@ export default function App() {
           filtered = notes.filter(n => !n.deleted);
       }
       
-      // NEW: Filter by Search Term
       if (searchTerm.trim()) {
           const lowerTerm = searchTerm.toLowerCase();
           filtered = filtered.filter(note => 
@@ -298,17 +306,32 @@ export default function App() {
   };
 
   const handleNoteSelect = async (id: string) => {
-    await saveCurrentNoteToDisk(); 
+    // FIX: Catch error so navigation proceeds even if save fails
+    try {
+        await saveCurrentNoteToDisk(); 
+    } catch (e) {
+        console.error("Save failed during note select, proceeding anyway:", e);
+    }
+    
     window.history.pushState({ noteId: id }, `Note ${id}`, `/note/${id}`);
     setActiveNoteId(id);
     setIsSidebarOpen(false); 
   };
 
   const handleCreateNote = async () => {
-    await saveCurrentNoteToDisk(); 
+    // FIX: Catch error
+    try {
+        await saveCurrentNoteToDisk(); 
+    } catch (e) {
+        console.error("Save failed during creation, proceeding:", e);
+    }
+
     const newNote = await noteService.createNote(settings.serverUrl); 
     setNotes(prev => [newNote, ...prev]);
+    
+    // Reuse safe handler
     handleNoteSelect(newNote.id); 
+    
     setSidebarView('notes'); 
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
@@ -383,7 +406,7 @@ export default function App() {
           return (
               <div key="dashboard" className={transitionClass}>
                   <Dashboard
-                      notes={visibleNotes} // Passed filtered notes
+                      notes={visibleNotes}
                       onSelectNote={handleNoteSelect}
                       onCreateNote={handleCreateNote}
                       onPinNote={handlePinNote}
@@ -441,8 +464,8 @@ export default function App() {
         onChangeView={setSidebarView}
         trashCount={trashCount}
         navigateToDashboard={navigateToDashboard}
-        searchTerm={searchTerm} // Pass state down
-        onSearch={setSearchTerm} // Pass setter down
+        searchTerm={searchTerm} 
+        onSearch={setSearchTerm} 
       />
       
       <div className="flex-1 flex flex-col min-w-0" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}> 
