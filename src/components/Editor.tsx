@@ -13,11 +13,13 @@ import TurndownService from 'turndown';
 
 // SVG Checkmark (White) - URL Encoded for CSS
 const CHECKMARK_SVG = `data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e`;
+const CHECKMARK_URL = `url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e")`;
 
 // Configure Marked globally
 const renderer = new marked.Renderer();
 
 // Override List Item to support CUSTOM STYLED checkboxes
+// Override List Item
 // @ts-ignore
 renderer.listitem = function (item: any) {
     let text = '';
@@ -42,6 +44,8 @@ renderer.listitem = function (item: any) {
         // CUSTOM CHECKBOX HTML
         // Note: We removed the inline style for background-image.
         // It is now handled by the <style> block in the component using the .task-checkbox:checked selector.
+        // FIX: Removed inline style background-image. 
+        // Added 'task-checkbox' class which targets the CSS rule defined in the component.
         return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
       <input type="checkbox" ${checked ? 'checked' : ''} 
              class="
@@ -60,7 +64,7 @@ renderer.listitem = function (item: any) {
     return `<li>${text}</li>`;
 };
 
-// Override Link Renderer to force new tab
+// Override Link Renderer
 // @ts-ignore
 renderer.link = function(href, title, text) {
     let cleanHref = href;
@@ -118,7 +122,6 @@ export const Editor: React.FC<EditorProps> = ({
 
     const isTrashed = note.deleted || false;
 
-    // Turndown service for HTML -> Markdown conversion
     const turndownService = useMemo(() => {
         const service = new TurndownService({
             headingStyle: 'atx',
@@ -181,7 +184,6 @@ export const Editor: React.FC<EditorProps> = ({
         return service;
     }, []);
 
-    // Initialize state when note changes
     useEffect(() => {
         setTitle(note.title);
         setCategory(note.category || 'General');
@@ -212,7 +214,6 @@ export const Editor: React.FC<EditorProps> = ({
         }
     }, [note.id, note.deleted]); 
 
-    // Handle Copy Code Buttons
     const attachCopyButtons = useCallback(() => {
         if (!contentEditableRef.current) return;
         const preBlocks = contentEditableRef.current.querySelectorAll('pre');
@@ -246,14 +247,12 @@ export const Editor: React.FC<EditorProps> = ({
         });
     }, []);
 
-    // Re-attach buttons when content updates
     useEffect(() => {
         if (viewMode !== 'preview') {
             attachCopyButtons();
         }
     }, [editorContent, viewMode, attachCopyButtons]);
 
-    // Mark dirty
     useEffect(() => {
         if (isTrashed) return;
         if (title !== note.title || category !== note.category || JSON.stringify(tags) !== JSON.stringify(note.tags)) {
@@ -261,7 +260,6 @@ export const Editor: React.FC<EditorProps> = ({
         }
     }, [title, category, tags, note.title, note.category, note.tags, isTrashed]);
 
-    // AutoSave
     useEffect(() => {
         if (isTrashed) return;
         if (!settings.autoSave) return;
@@ -271,7 +269,6 @@ export const Editor: React.FC<EditorProps> = ({
         return () => clearInterval(timer);
     }, [settings.autoSave, settings.saveInterval, isDirty, isTrashed]);
 
-    // Shortcuts
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -830,6 +827,7 @@ export const Editor: React.FC<EditorProps> = ({
             <style>{`
                 .task-checkbox:checked {
                     background-image: url("${CHECKMARK_SVG}");
+                    background-image: ${CHECKMARK_URL};
                     background-position: center;
                     background-repeat: no-repeat;
                     background-size: 100%;
@@ -912,10 +910,9 @@ export const Editor: React.FC<EditorProps> = ({
                         <input
                             type="text"
                             value={title}
-                            // CRITICAL FIX: Push title state immediately to App.tsx state.
                             onChange={(e) => {
                                 setTitle(e.target.value);
-                                onChange({ title: e.target.value }, false); // Do not trigger save to disk here
+                                onChange({ title: e.target.value }, false); 
                             }}
                             onFocus={handleTitleFocus}
                             onBlur={handleTitleBlur}
@@ -1048,7 +1045,7 @@ export const Editor: React.FC<EditorProps> = ({
                 </div>
             )}
 
-            {/* EDITOR CONTENT - FIX: Added custom prose styling for links */}
+            {/* EDITOR CONTENT */}
             <div className="flex-1 overflow-hidden relative">
                 {viewMode === 'preview' ? (
                     <textarea

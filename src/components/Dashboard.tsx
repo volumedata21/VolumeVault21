@@ -45,6 +45,9 @@ const lightenColor = (color: string, percent: number) => {
     const B = (num & 0x0000FF) + amt;
     return '#' + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
 };
+// FIX: Reduced size from 14px to 10px (~70%)
+const CHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-blue-600 dark:text-blue-400 align-middle"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
+const UNCHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-gray-400 dark:text-gray-500 align-middle"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
 
 const decodeHTMLEntities = (text: string): string => {
     try {
@@ -61,6 +64,16 @@ const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
     if (trimmedHtml.startsWith('<h2>')) return 2;
     if (trimmedHtml.startsWith('<h3>')) return 3;
     return 0; 
+};
+
+// Helper to lighten a hex color by % (for border calculation)
+const lightenColor = (color: string, percent: number) => {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    return '#' + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
 };
 
 // Utility: DOMParser-based stripper
@@ -147,6 +160,7 @@ const processNoteContent = (html: string) => {
                        if (checkbox) {
                            const checked = checkbox.hasAttribute('checked');
                            // Use SVG Icons for Checkboxes
+                           // FIX: Use updated SVG strings
                            bodyPreview += checked ? CHECKED_SVG : UNCHECKED_SVG;
                            child.childNodes.forEach(c => { if (c.nodeName !== 'INPUT') walk(c); });
                        } else {
@@ -347,7 +361,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
               
               <div className="mt-4 flex items-center justify-between p-4 pt-0">
                   <div className="flex items-center gap-3">
-                      {/* FIX: White stroke for unselected circle if note has color */}
                       <div 
                         className={`w-[18px] h-[18px] rounded-full flex items-center justify-center cursor-pointer transition-all border-2 ${
                             isSelected 
