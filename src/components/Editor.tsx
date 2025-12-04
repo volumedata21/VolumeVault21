@@ -14,21 +14,10 @@ import TurndownService from 'turndown';
 // SVG Checkmark (White) - URL Encoded for CSS
 const CHECKMARK_SVG = `data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e`;
 
-// Shared Checkbox Classes to ensure consistency between Renderer and Insert Action
-const CHECKBOX_CLASSES = `
-    task-checkbox
-    appearance-none h-5 w-5 border-2 border-sky-400 dark:border-sky-500 rounded-md bg-transparent
-    hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/30 dark:hover:border-sky-400
-    checked:bg-sky-600 checked:border-sky-600 dark:checked:bg-sky-500 dark:checked:border-sky-500
-    focus:ring-2 focus:ring-sky-400 focus:outline-none
-    cursor-pointer transition-all duration-200 ease-in-out
-    flex-shrink-0 mt-0.5 mr-2
-`;
-
 // Configure Marked globally
 const renderer = new marked.Renderer();
 
-// Override List Item to support checkboxes
+// Override List Item to support CUSTOM STYLED checkboxes
 // @ts-ignore
 renderer.listitem = function (item: any) {
     let text = '';
@@ -49,9 +38,23 @@ renderer.listitem = function (item: any) {
 
     if (task) {
         const cleanText = text.replace(/^<input[^>]+>\s*/, '');
-        return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
-      <input type="checkbox" ${checked ? 'checked' : ''} class="${CHECKBOX_CLASSES}">
-      <span style="flex: 1; min-width: 0; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${cleanText}</span>
+
+        // CUSTOM CHECKBOX HTML
+        // FIX: Switched to absolute positioning to align with standard lists
+        // 'absolute -left-6' puts the box in the padding gutter, aligning text with bullets/numbers
+        return `<li class="checklist-item" style="list-style: none; position: relative; margin-bottom: 0.25rem;">
+      <input type="checkbox" ${checked ? 'checked' : ''} 
+             class="
+                task-checkbox
+                appearance-none h-5 w-5 border-2 border-sky-400 dark:border-sky-500 rounded-md bg-transparent
+                hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/30 dark:hover:border-sky-400
+                checked:bg-sky-600 checked:border-sky-600 dark:checked:bg-sky-500 dark:checked:border-sky-500
+                focus:ring-2 focus:ring-sky-400 focus:outline-none
+                cursor-pointer transition-all duration-200 ease-in-out
+                absolute -left-6 top-0.5
+             "
+      >
+      <span style="display: block; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${cleanText}</span>
     </li>`;
     }
     return `<li>${text}</li>`;
@@ -304,6 +307,7 @@ export const Editor: React.FC<EditorProps> = ({
             contentToSave = turndownService.turndown(html);
         }
 
+        // Force save to disk on manual save
         onChange({ title, category, tags, content: contentToSave }, true);
         onSave();
         setIsDirty(false);
@@ -415,11 +419,20 @@ export const Editor: React.FC<EditorProps> = ({
         if (contentEditableRef.current) contentEditableRef.current.focus();
 
         const uniqueId = `cl-${Date.now()}`;
-        // FIX: Updated inserted HTML to match the renderer's structure and classes
+        // FIX: Updated inserted HTML to align with renderer styles
+        // Using relative li and absolute input for alignment
         const html = `<ul style="list-style: none;">
-        <li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
-            <input type="checkbox" class="${CHECKBOX_CLASSES.replace(/\s+/g, ' ').trim()}">
-            <span id="${uniqueId}" style="flex: 1; min-width: 0;"><br></span>
+        <li class="checklist-item" style="list-style: none; position: relative; margin-bottom: 0.25rem;">
+            <input type="checkbox" class="
+                task-checkbox
+                appearance-none h-5 w-5 border-2 border-sky-400 dark:border-sky-500 rounded-md bg-transparent
+                hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/30 dark:hover:border-sky-400
+                checked:bg-sky-600 checked:border-sky-600 dark:checked:bg-sky-500 dark:checked:border-sky-500
+                focus:ring-2 focus:ring-sky-400 focus:outline-none
+                cursor-pointer transition-all duration-200 ease-in-out
+                absolute -left-6 top-0.5
+             ">
+            <span id="${uniqueId}" style="display: block;"><br></span>
         </li>
       </ul>`;
 
@@ -685,7 +698,7 @@ export const Editor: React.FC<EditorProps> = ({
                             const newLi = document.createElement('li');
                             newLi.className = 'checklist-item';
                             newLi.style.cssText = 'list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;';
-                            newLi.innerHTML = `<input type="checkbox" class="${CHECKBOX_CLASSES.replace(/\s+/g, ' ').trim()}"><span><br></span>`;
+                            newLi.innerHTML = `<input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;"><span><br></span>`;
 
                             if (li.nextSibling) {
                                 li.parentNode?.insertBefore(newLi, li.nextSibling);
@@ -909,9 +922,10 @@ export const Editor: React.FC<EditorProps> = ({
                         <input
                             type="text"
                             value={title}
+                            // CRITICAL FIX: Push title state immediately to App.tsx state.
                             onChange={(e) => {
                                 setTitle(e.target.value);
-                                onChange({ title: e.target.value }, false); 
+                                onChange({ title: e.target.value }, false); // Do not trigger save to disk here
                             }}
                             onFocus={handleTitleFocus}
                             onBlur={handleTitleBlur}
@@ -1076,6 +1090,8 @@ export const Editor: React.FC<EditorProps> = ({
                         prose-p:my-2 prose-headings:my-4 prose-img:rounded-lg prose-img:shadow-md
                         prose-img:max-h-[400px] prose-img:w-auto prose-img:max-w-full prose-img:object-contain
                         prose-a:text-[#788eb7] prose-a:no-underline prose-a:font-normal prose-a:cursor-pointer
+                        // ADDED: Override prose list styles to ensure indentation and alignment
+                        prose-ul:pl-6 prose-ol:pl-6
                         ${isPlaceholderContent && viewMode === 'edit' ? 'text-gray-300 dark:text-gray-600 italic' : ''}
                         ${viewMode === 'readOnly' || isTrashed ? 'select-text' : ''}
                     `}
