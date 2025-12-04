@@ -26,8 +26,8 @@ const NOTE_COLORS = [
   { name: 'Royal Purple', value: '#51127C' },   
   { name: 'Berry', value: '#9D2E66' },         
   { name: 'Vibrant Red', value: '#DD3D2D' },    
-  { name: 'Burnt Orange', value: '#C65D3B' },  
-  { name: 'Gold', value: '#c29e52' },          
+  { name: 'Burnt Orange', value: '#C65D3B' },
+  { name: 'Gold', value: '#c29e52' },
   { name: 'Forest Green', value: '#2F855A' },  
   { name: 'Ocean', value: '#1F7A7A' },         
 ];
@@ -407,12 +407,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                       ))}
                                   </div>
 
-                                  <button onClick={() => { onDuplicateNote(note); setActiveMenuId(null); }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 text-gray-700 dark:text-gray-200">
-                                      <Copy size={14} /> Duplicate
-                                  </button>
-                                  <button onClick={() => { onBulkDelete([note.id]); setActiveMenuId(null); }} className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
-                                      <Trash2 size={14} /> Delete
-                                  </button>
+                                  <div className="flex items-center px-2">
+                                      <button 
+                                        onClick={() => { onDuplicateNote(note); setActiveMenuId(null); }} 
+                                        className="flex-1 px-2 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 text-gray-700 dark:text-gray-200 rounded"
+                                      >
+                                          <Copy size={14} /> Duplicate
+                                      </button>
+                                      <button 
+                                        onClick={() => { onBulkDelete([note.id]); setActiveMenuId(null); }} 
+                                        className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                                        title="Delete"
+                                      >
+                                          <Trash2 size={16} />
+                                      </button>
+                                  </div>
                               </div>
                           )}
                       </div>
