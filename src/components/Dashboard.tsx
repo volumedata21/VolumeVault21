@@ -31,8 +31,7 @@ const NOTE_COLORS = [
   { name: 'Ocean', value: '#1F7A7A' },         
 ];
 
-// SVG Checkmark for Dashboard Preview
-// FIX: Reduced size from 14px to 10px (~70%)
+// SVG Checkmarks for Dashboard Preview (10px size)
 const CHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-blue-600 dark:text-blue-400 align-middle"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
 const UNCHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-gray-400 dark:text-gray-500 align-middle"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
 
@@ -101,11 +100,14 @@ const processNoteContent = (html: string) => {
 
       if (node.nodeType === Node.TEXT_NODE) {
           const text = node.textContent || '';
+          // Ignore purely whitespace text nodes that might be between block tags
+          if (!text.trim() && text.includes('\n')) return;
           bodyPreview += text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       } else if (node.nodeType === Node.ELEMENT_NODE) {
           const el = node as HTMLElement;
           const tagName = el.tagName.toLowerCase();
           
+          // Preserve Inline Formatting
           if (['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del', 'code', 'pre', 'blockquote'].includes(tagName)) {
               bodyPreview += `<${tagName}>`;
               el.childNodes.forEach(walk);
@@ -113,6 +115,7 @@ const processNoteContent = (html: string) => {
               return;
           }
           
+          // Handle Block Breaks
           const isBlock = ['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName);
           
           const preventBreak = 
@@ -127,22 +130,26 @@ const processNoteContent = (html: string) => {
               bodyPreview += '<br>';
           }
 
+          // Handle Ordered Lists
           if (tagName === 'ol') {
               let idx = 1;
               Array.from(el.children).forEach(child => {
                   if (child.nodeName === 'LI') {
-                       if (bodyPreview && !bodyPreview.endsWith('<br>') && !/<blockquote>\s*$/i.test(bodyPreview)) bodyPreview += '<br>';
-                       bodyPreview += `<span class="text-gray-900 dark:text-gray-200 font-medium">${idx}.</span> `;
+                       if (bodyPreview && !bodyPreview.endsWith('<br>') && !/<blockquote>\s*$/i.test(bodyPreview) && !/<\/blockquote>\s*$/i.test(bodyPreview)) bodyPreview += '<br>';
+                       // Standard colored numbering
+                       bodyPreview += `<span class="font-medium">${idx}.</span> `;
                        child.childNodes.forEach(walk);
                        idx++;
                   }
               });
               return;
           }
+          // Handle Unordered Lists & Checklists
           if (tagName === 'ul') {
                Array.from(el.children).forEach(child => {
                   if (child.nodeName === 'LI') {
-                       if (bodyPreview && !bodyPreview.endsWith('<br>') && !/<blockquote>\s*$/i.test(bodyPreview)) bodyPreview += '<br>';
+                       if (bodyPreview && !bodyPreview.endsWith('<br>') && !/<blockquote>\s*$/i.test(bodyPreview) && !/<\/blockquote>\s*$/i.test(bodyPreview)) bodyPreview += '<br>';
+                       
                        const checkbox = child.querySelector('input[type="checkbox"]');
                        if (checkbox) {
                            const checked = checkbox.hasAttribute('checked');
@@ -163,9 +170,11 @@ const processNoteContent = (html: string) => {
               return;
           }
           
+          // Handle Links
           if (tagName === 'a') {
               const href = el.getAttribute('href');
               if (href) {
+                  // Universal Link Styling (Blue, No Underline, Safe)
                   const attrs = ` href="${href}" target="_blank" rel="noopener noreferrer" class="text-[#788eb7] no-underline z-20 relative" onclick="event.stopPropagation()"`;
                   bodyPreview += `<a${attrs}>`;
                   el.childNodes.forEach(walk);
@@ -184,6 +193,7 @@ const processNoteContent = (html: string) => {
       currentNode = currentNode.nextSibling;
   }
 
+  // Trim trailing breaks
   bodyPreview = bodyPreview.replace(/(<br\s*\/?>)+$/i, '');
 
   return { imageUrl, headingLevel, headingLine, bodyPreview };
@@ -246,6 +256,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       
       const { imageUrl, headingLevel, headingLine, bodyPreview } = processNoteContent(htmlContent);
       
+      // Limit Lines
       const lines = bodyPreview.split('<br>');
       const bodySnippet = lines.slice(0, 5).join('<br>'); 
 
@@ -313,7 +324,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   )}
                   
                   <div className="p-4 pb-0"> 
-                      {/* FIX: Pin Button Visibility for Touch */}
+                      {/* Pin Button: Always visible on mobile, Hover on desktop */}
                       <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${note.isPinned ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
                           <button
                               onClick={(e) => { e.stopPropagation(); onPinNote(note.id); }}
@@ -347,13 +358,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
               
               <div className="mt-4 flex items-center justify-between p-4 pt-0">
                   <div className="flex items-center gap-3">
-                      {/* FIX: White stroke for unselected circle if note has color */}
+                      {/* Select Circle: Outline when not selected, White if custom color */}
                       <div 
                         className={`w-[18px] h-[18px] rounded-full flex items-center justify-center cursor-pointer transition-all border-2 ${
                             isSelected 
                                 ? 'bg-blue-600 border-blue-600' 
                                 : (note.color 
-                                    ? 'bg-transparent border-white/80 hover:border-white hover:bg-white/10' 
+                                    ? 'bg-transparent border-white/70 hover:border-white hover:bg-white/10' 
                                     : 'bg-transparent border-gray-400 dark:border-gray-500 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20')
                         }`}
                         onClick={(e) => { e.stopPropagation(); toggleSelection(note.id); }}
@@ -366,7 +377,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                   </div>
 
-                  {/* FIX: More Button Visibility for Touch */}
+                  {/* More Button: Always visible on mobile, Hover on desktop */}
                   <div className={`transition-opacity ${activeMenuId === note.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
                       <div className="relative">
                           <button
@@ -406,7 +417,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           )})}
       </div>
-
+      
+      {/* Bulk Actions and Modals (Standard logic) */}
       {isSelectionMode && (
           <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 rounded-full px-6 py-3 flex items-center gap-6 z-50">
               <span className="text-sm font-bold text-gray-500">{selectedIds.size} selected</span>

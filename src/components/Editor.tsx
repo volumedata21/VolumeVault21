@@ -40,7 +40,6 @@ renderer.listitem = function (item: any) {
         const cleanText = text.replace(/^<input[^>]+>\s*/, '');
 
         // CUSTOM CHECKBOX HTML
-        // FIX: Switched to absolute positioning to align with standard lists
         // 'absolute -left-6' puts the box in the padding gutter, aligning text with bullets/numbers
         return `<li class="checklist-item" style="list-style: none; position: relative; margin-bottom: 0.25rem;">
       <input type="checkbox" ${checked ? 'checked' : ''} 
@@ -125,13 +124,22 @@ export const Editor: React.FC<EditorProps> = ({
             codeBlockStyle: 'fenced'
         });
 
-        service.addRule('checklist', {
-            filter: 'input',
-            replacement: function (_content: any, node: any) {
-                if (node.type === 'checkbox') {
-                    return node.checked ? '[x] ' : '[ ] ';
-                }
-                return '';
+        // FIX: Improved Checklist Rule to prevent "ghost" items
+        // Targets the LI container directly instead of the input, ensuring 
+        // the entire line is reconstructed as standard markdown.
+        service.addRule('checklistItems', {
+            filter: function (node: HTMLElement) {
+                return node.nodeName === 'LI' && node.classList.contains('checklist-item');
+            },
+            replacement: function (_content: string, node: HTMLElement) {
+                const checkbox = node.querySelector('input[type="checkbox"]') as HTMLInputElement;
+                const isChecked = checkbox?.checked;
+                
+                // Extract text from the span to avoid grabbing input values or extra whitespace
+                const span = node.querySelector('span');
+                const text = span ? span.textContent?.trim() : node.textContent?.trim();
+                
+                return (isChecked ? '- [x] ' : '- [ ] ') + (text || '') + '\n';
             }
         });
 
@@ -419,7 +427,6 @@ export const Editor: React.FC<EditorProps> = ({
         if (contentEditableRef.current) contentEditableRef.current.focus();
 
         const uniqueId = `cl-${Date.now()}`;
-        // FIX: Updated inserted HTML to align with renderer styles
         // Using relative li and absolute input for alignment
         const html = `<ul style="list-style: none;">
         <li class="checklist-item" style="list-style: none; position: relative; margin-bottom: 0.25rem;">
@@ -697,8 +704,22 @@ export const Editor: React.FC<EditorProps> = ({
                         } else {
                             const newLi = document.createElement('li');
                             newLi.className = 'checklist-item';
-                            newLi.style.cssText = 'list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;';
-                            newLi.innerHTML = `<input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;"><span><br></span>`;
+                            // UPDATED: Match the 'relative' positioning used in renderer.listitem
+                            newLi.style.cssText = 'list-style: none; position: relative; margin-bottom: 0.25rem;';
+                            
+                            // UPDATED: Apply the full set of Tailwind classes to the input
+                            newLi.innerHTML = `
+                                <input type="checkbox" class="
+                                    task-checkbox
+                                    appearance-none h-5 w-5 border-2 border-sky-400 dark:border-sky-500 rounded-md bg-transparent
+                                    hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/30 dark:hover:border-sky-400
+                                    checked:bg-sky-600 checked:border-sky-600 dark:checked:bg-sky-500 dark:checked:border-sky-500
+                                    focus:ring-2 focus:ring-sky-400 focus:outline-none
+                                    cursor-pointer transition-all duration-200 ease-in-out
+                                    absolute -left-6 top-0.5
+                                ">
+                                <span style="display: block;"><br></span>
+                            `;
 
                             if (li.nextSibling) {
                                 li.parentNode?.insertBefore(newLi, li.nextSibling);
