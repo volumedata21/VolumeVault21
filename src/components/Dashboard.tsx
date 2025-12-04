@@ -31,6 +31,11 @@ const NOTE_COLORS = [
   { name: 'Ocean', value: '#1F7A7A' },         
 ];
 
+// SVG Checkmark for Dashboard Preview
+// FIX: Reduced size from 14px to 10px (~70%)
+const CHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-blue-600 dark:text-blue-400 align-middle"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
+const UNCHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-gray-400 dark:text-gray-500 align-middle"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
+
 // Helper to lighten a hex color by % (for border calculation)
 const lightenColor = (color: string, percent: number) => {
     const num = parseInt(color.replace('#', ''), 16);
@@ -58,10 +63,6 @@ const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
     return 0; 
 };
 
-// SVG Checkmark for Dashboard Preview
-const CHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-blue-600 dark:text-blue-400 align-middle"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
-const UNCHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-gray-400 dark:text-gray-500 align-middle"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
-
 // Utility: DOMParser-based stripper
 const processNoteContent = (html: string) => {
   if (!html) return { imageUrl: null, headingLevel: 0, headingLine: '', bodyPreview: '' };
@@ -69,9 +70,11 @@ const processNoteContent = (html: string) => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
   
+  // 1. Extract Cover Image
   const img = doc.querySelector('img');
   const imageUrl = img ? img.getAttribute('src') : null;
   
+  // 2. Find First Text Content
   let contentStartNode = doc.body.firstChild;
   while (contentStartNode && (
       (contentStartNode.nodeType !== Node.ELEMENT_NODE && !contentStartNode.textContent?.trim()) || 
@@ -89,6 +92,7 @@ const processNoteContent = (html: string) => {
       contentStartNode = contentStartNode.nextSibling;
   }
 
+  // 3. Generate Body Preview
   let bodyPreview = '';
   
   const walk = (node: Node) => {
@@ -310,7 +314,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   
                   <div className="p-4 pb-0"> 
                       {/* FIX: Pin Button Visibility for Touch */}
-                      {/* Logic: Opacity-100 (Always visible) on mobile. On desktop (md:), opacity-0 unless hovered. */}
                       <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${note.isPinned ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
                           <button
                               onClick={(e) => { e.stopPropagation(); onPinNote(note.id); }}
@@ -350,7 +353,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             isSelected 
                                 ? 'bg-blue-600 border-blue-600' 
                                 : (note.color 
-                                    ? 'bg-transparent border-white/70 hover:border-white hover:bg-white/10' 
+                                    ? 'bg-transparent border-white/80 hover:border-white hover:bg-white/10' 
                                     : 'bg-transparent border-gray-400 dark:border-gray-500 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20')
                         }`}
                         onClick={(e) => { e.stopPropagation(); toggleSelection(note.id); }}
@@ -364,7 +367,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
 
                   {/* FIX: More Button Visibility for Touch */}
-                  {/* Logic: Opacity-100 (Always visible) on mobile. On desktop (md:), opacity-0 unless hovered. */}
                   <div className={`transition-opacity ${activeMenuId === note.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
                       <div className="relative">
                           <button
@@ -405,7 +407,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           )})}
       </div>
 
-      {/* ... Bulk Actions & Modals ... */}
       {isSelectionMode && (
           <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 rounded-full px-6 py-3 flex items-center gap-6 z-50">
               <span className="text-sm font-bold text-gray-500">{selectedIds.size} selected</span>
