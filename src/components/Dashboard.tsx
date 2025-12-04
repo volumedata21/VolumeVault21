@@ -31,6 +31,20 @@ const NOTE_COLORS = [
   { name: 'Ocean', value: '#1F7A7A' },         
 ];
 
+// SVG Checkmark for Dashboard Preview
+// FIX: Reduced size from 14px to 10px (~70%)
+const CHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-blue-600 dark:text-blue-400 align-middle"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
+const UNCHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-gray-400 dark:text-gray-500 align-middle"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
+
+// Helper to lighten a hex color by % (for border calculation)
+const lightenColor = (color: string, percent: number) => {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    return '#' + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
+};
 // FIX: Reduced size from 14px to 10px (~70%)
 const CHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-blue-600 dark:text-blue-400 align-middle"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
 const UNCHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-gray-400 dark:text-gray-500 align-middle"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
@@ -145,6 +159,7 @@ const processNoteContent = (html: string) => {
                        const checkbox = child.querySelector('input[type="checkbox"]');
                        if (checkbox) {
                            const checked = checkbox.hasAttribute('checked');
+                           // Use SVG Icons for Checkboxes
                            // FIX: Use updated SVG strings
                            bodyPreview += checked ? CHECKED_SVG : UNCHECKED_SVG;
                            child.childNodes.forEach(c => { if (c.nodeName !== 'INPUT') walk(c); });
@@ -312,7 +327,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   )}
                   
                   <div className="p-4 pb-0"> 
-                      <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${note.isPinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                      {/* FIX: Pin Button Visibility for Touch */}
+                      <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${note.isPinned ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
                           <button
                               onClick={(e) => { e.stopPropagation(); onPinNote(note.id); }}
                               className={`p-1 rounded-full hover:bg-black/10 transition-colors ${note.isPinned ? (isDark ? 'text-white' : 'text-blue-600') : (isDark ? 'text-white/50 hover:text-white' : 'text-gray-400 hover:text-blue-600')}`}
@@ -363,7 +379,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                   </div>
 
-                  <div className={`transition-opacity ${activeMenuId === note.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                  {/* FIX: More Button Visibility for Touch */}
+                  <div className={`transition-opacity ${activeMenuId === note.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
                       <div className="relative">
                           <button
                               onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === note.id ? null : note.id); }}

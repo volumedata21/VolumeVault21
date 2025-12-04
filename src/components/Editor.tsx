@@ -12,11 +12,13 @@ import { marked } from 'marked';
 import TurndownService from 'turndown';
 
 // SVG Checkmark (White) - URL Encoded for CSS
+const CHECKMARK_SVG = `data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e`;
 const CHECKMARK_URL = `url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e")`;
 
 // Configure Marked globally
 const renderer = new marked.Renderer();
 
+// Override List Item to support CUSTOM STYLED checkboxes
 // Override List Item
 // @ts-ignore
 renderer.listitem = function (item: any) {
@@ -39,6 +41,9 @@ renderer.listitem = function (item: any) {
     if (task) {
         const cleanText = text.replace(/^<input[^>]+>\s*/, '');
 
+        // CUSTOM CHECKBOX HTML
+        // Note: We removed the inline style for background-image.
+        // It is now handled by the <style> block in the component using the .task-checkbox:checked selector.
         // FIX: Removed inline style background-image. 
         // Added 'task-checkbox' class which targets the CSS rule defined in the component.
         return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
@@ -284,6 +289,7 @@ export const Editor: React.FC<EditorProps> = ({
         if (viewMode === 'preview') {
             contentToSave = sourceTextareaRef.current?.value || '';
         } else {
+            // Sync Checkbox Attributes before saving
             if (contentEditableRef.current) {
                 const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach((cb: any) => {
@@ -298,6 +304,7 @@ export const Editor: React.FC<EditorProps> = ({
             contentToSave = turndownService.turndown(html);
         }
 
+        // Force save to disk on manual save
         onChange({ title, category, tags, content: contentToSave }, true);
         onSave();
         setIsDirty(false);
@@ -819,6 +826,7 @@ export const Editor: React.FC<EditorProps> = ({
             {/* FIX: Added custom CSS for checked checkbox background image */}
             <style>{`
                 .task-checkbox:checked {
+                    background-image: url("${CHECKMARK_SVG}");
                     background-image: ${CHECKMARK_URL};
                     background-position: center;
                     background-repeat: no-repeat;
