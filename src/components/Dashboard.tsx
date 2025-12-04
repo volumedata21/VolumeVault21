@@ -27,8 +27,8 @@ const NOTE_COLORS = [
   { name: 'Berry', value: '#9D2E66' },         
   { name: 'Vibrant Red', value: '#DD3D2D' },    
   { name: 'Burnt Orange', value: '#C65D3B' },  
+  { name: 'Gold', value: '#c29e52' },          
   { name: 'Forest Green', value: '#2F855A' },  
-  { name: 'Teal', value: '#21918C' },          
   { name: 'Ocean', value: '#1F7A7A' },         
 ];
 
