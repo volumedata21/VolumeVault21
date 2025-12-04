@@ -13,13 +13,22 @@ import TurndownService from 'turndown';
 
 // SVG Checkmark (White) - URL Encoded for CSS
 const CHECKMARK_SVG = `data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e`;
-const CHECKMARK_URL = `url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e")`;
+
+// Shared Checkbox Classes to ensure consistency between Renderer and Insert Action
+const CHECKBOX_CLASSES = `
+    task-checkbox
+    appearance-none h-5 w-5 border-2 border-sky-400 dark:border-sky-500 rounded-md bg-transparent
+    hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/30 dark:hover:border-sky-400
+    checked:bg-sky-600 checked:border-sky-600 dark:checked:bg-sky-500 dark:checked:border-sky-500
+    focus:ring-2 focus:ring-sky-400 focus:outline-none
+    cursor-pointer transition-all duration-200 ease-in-out
+    flex-shrink-0 mt-0.5 mr-2
+`;
 
 // Configure Marked globally
 const renderer = new marked.Renderer();
 
-// Override List Item to support CUSTOM STYLED checkboxes
-// Override List Item
+// Override List Item to support checkboxes
 // @ts-ignore
 renderer.listitem = function (item: any) {
     let text = '';
@@ -40,31 +49,15 @@ renderer.listitem = function (item: any) {
 
     if (task) {
         const cleanText = text.replace(/^<input[^>]+>\s*/, '');
-
-        // CUSTOM CHECKBOX HTML
-        // Note: We removed the inline style for background-image.
-        // It is now handled by the <style> block in the component using the .task-checkbox:checked selector.
-        // FIX: Removed inline style background-image. 
-        // Added 'task-checkbox' class which targets the CSS rule defined in the component.
         return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
-      <input type="checkbox" ${checked ? 'checked' : ''} 
-             class="
-                task-checkbox
-                appearance-none h-5 w-5 border-2 border-sky-400 dark:border-sky-500 rounded-md bg-transparent
-                hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/30 dark:hover:border-sky-400
-                checked:bg-sky-600 checked:border-sky-600 dark:checked:bg-sky-500 dark:checked:border-sky-500
-                focus:ring-2 focus:ring-sky-400 focus:outline-none
-                cursor-pointer transition-all duration-200 ease-in-out
-                flex-shrink-0 mt-0.5 mr-2
-             "
-      >
+      <input type="checkbox" ${checked ? 'checked' : ''} class="${CHECKBOX_CLASSES}">
       <span style="flex: 1; min-width: 0; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${cleanText}</span>
     </li>`;
     }
     return `<li>${text}</li>`;
 };
 
-// Override Link Renderer
+// Override Link Renderer to force new tab
 // @ts-ignore
 renderer.link = function(href, title, text) {
     let cleanHref = href;
@@ -122,6 +115,7 @@ export const Editor: React.FC<EditorProps> = ({
 
     const isTrashed = note.deleted || false;
 
+    // Turndown service for HTML -> Markdown conversion
     const turndownService = useMemo(() => {
         const service = new TurndownService({
             headingStyle: 'atx',
@@ -184,6 +178,7 @@ export const Editor: React.FC<EditorProps> = ({
         return service;
     }, []);
 
+    // Initialize state when note changes
     useEffect(() => {
         setTitle(note.title);
         setCategory(note.category || 'General');
@@ -214,6 +209,7 @@ export const Editor: React.FC<EditorProps> = ({
         }
     }, [note.id, note.deleted]); 
 
+    // Handle Copy Code Buttons
     const attachCopyButtons = useCallback(() => {
         if (!contentEditableRef.current) return;
         const preBlocks = contentEditableRef.current.querySelectorAll('pre');
@@ -247,12 +243,14 @@ export const Editor: React.FC<EditorProps> = ({
         });
     }, []);
 
+    // Re-attach buttons when content updates
     useEffect(() => {
         if (viewMode !== 'preview') {
             attachCopyButtons();
         }
     }, [editorContent, viewMode, attachCopyButtons]);
 
+    // Mark dirty
     useEffect(() => {
         if (isTrashed) return;
         if (title !== note.title || category !== note.category || JSON.stringify(tags) !== JSON.stringify(note.tags)) {
@@ -260,6 +258,7 @@ export const Editor: React.FC<EditorProps> = ({
         }
     }, [title, category, tags, note.title, note.category, note.tags, isTrashed]);
 
+    // AutoSave
     useEffect(() => {
         if (isTrashed) return;
         if (!settings.autoSave) return;
@@ -269,6 +268,7 @@ export const Editor: React.FC<EditorProps> = ({
         return () => clearInterval(timer);
     }, [settings.autoSave, settings.saveInterval, isDirty, isTrashed]);
 
+    // Shortcuts
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -304,7 +304,6 @@ export const Editor: React.FC<EditorProps> = ({
             contentToSave = turndownService.turndown(html);
         }
 
-        // Force save to disk on manual save
         onChange({ title, category, tags, content: contentToSave }, true);
         onSave();
         setIsDirty(false);
@@ -416,9 +415,10 @@ export const Editor: React.FC<EditorProps> = ({
         if (contentEditableRef.current) contentEditableRef.current.focus();
 
         const uniqueId = `cl-${Date.now()}`;
+        // FIX: Updated inserted HTML to match the renderer's structure and classes
         const html = `<ul style="list-style: none;">
         <li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
-            <input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
+            <input type="checkbox" class="${CHECKBOX_CLASSES.replace(/\s+/g, ' ').trim()}">
             <span id="${uniqueId}" style="flex: 1; min-width: 0;"><br></span>
         </li>
       </ul>`;
@@ -685,7 +685,7 @@ export const Editor: React.FC<EditorProps> = ({
                             const newLi = document.createElement('li');
                             newLi.className = 'checklist-item';
                             newLi.style.cssText = 'list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;';
-                            newLi.innerHTML = `<input type="checkbox" style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;"><span><br></span>`;
+                            newLi.innerHTML = `<input type="checkbox" class="${CHECKBOX_CLASSES.replace(/\s+/g, ' ').trim()}"><span><br></span>`;
 
                             if (li.nextSibling) {
                                 li.parentNode?.insertBefore(newLi, li.nextSibling);
@@ -827,7 +827,6 @@ export const Editor: React.FC<EditorProps> = ({
             <style>{`
                 .task-checkbox:checked {
                     background-image: url("${CHECKMARK_SVG}");
-                    background-image: ${CHECKMARK_URL};
                     background-position: center;
                     background-repeat: no-repeat;
                     background-size: 100%;
@@ -1045,7 +1044,7 @@ export const Editor: React.FC<EditorProps> = ({
                 </div>
             )}
 
-            {/* EDITOR CONTENT */}
+            {/* EDITOR CONTENT - FIX: Added custom prose styling for links */}
             <div className="flex-1 overflow-hidden relative">
                 {viewMode === 'preview' ? (
                     <textarea
