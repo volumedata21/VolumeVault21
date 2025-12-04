@@ -88,6 +88,9 @@ interface EditorProps {
     availableCategories: string[];
     onRestore?: () => void;
     onDeleteForever?: () => void;
+    // NEW Props for controlled view mode
+    preferredViewMode: 'edit' | 'readOnly';
+    onViewModeChange: (mode: 'edit' | 'readOnly') => void;
 }
 
 const DEFAULT_CONTENT = '# New Note\n\nStart writing here...';
@@ -100,7 +103,9 @@ export const Editor: React.FC<EditorProps> = ({
     settings,
     availableCategories,
     onRestore,
-    onDeleteForever
+    onDeleteForever,
+    preferredViewMode,
+    onViewModeChange
 }) => {
     const [title, setTitle] = useState(note.title);
     const [category, setCategory] = useState(note.category || 'General');
@@ -109,7 +114,9 @@ export const Editor: React.FC<EditorProps> = ({
 
     const [isDirty, setIsDirty] = useState(false);
     const [isContentFocused, setIsContentFocused] = useState(false);
-    const [viewMode, setViewMode] = useState<'edit' | 'preview' | 'readOnly'>('edit');
+    
+    // Internal state for 'preview' (Source mode) is still local since it's temporary/rare
+    const [isSourceMode, setIsSourceMode] = useState(false); 
     const [editorContent, setEditorContent] = useState('');
 
     const contentEditableRef = useRef<HTMLDivElement>(null);
@@ -118,6 +125,9 @@ export const Editor: React.FC<EditorProps> = ({
     const savedSelection = useRef<Range | null>(null);
 
     const isTrashed = note.deleted || false;
+    
+    // Computed view mode: Trash forces readOnly, otherwise use user preference
+    const viewMode = isTrashed ? 'readOnly' : (isSourceMode ? 'preview' : preferredViewMode);
 
     // Turndown service for HTML -> Markdown conversion
     const turndownService = useMemo(() => {
@@ -192,11 +202,10 @@ export const Editor: React.FC<EditorProps> = ({
         // 1. Fix raw <pre> tags and recover newlines from HTML
         contentEditableRef.current.querySelectorAll('pre').forEach((pre) => {
             if (!pre.querySelector('code')) {
-                 // FIX: Use innerText to preserve newlines from <div> or <br> tags
                  const rawText = pre.innerText || ''; 
                  
                  const code = document.createElement('code');
-                 code.textContent = rawText; // Safe set preventing XSS
+                 code.textContent = rawText; 
                  
                  pre.innerHTML = '';
                  pre.appendChild(code);
@@ -206,18 +215,13 @@ export const Editor: React.FC<EditorProps> = ({
         // 2. Apply Highlight.js to all code blocks
         contentEditableRef.current.querySelectorAll('pre code').forEach((block) => {
              const el = block as HTMLElement;
-             
-             // FIX: If the block contains HTML <br> tags (from editing), convert them to \n
-             // This ensures HLJS sees the structure as multi-line code.
              if (el.innerHTML.includes('<br')) {
-                 // Use a temporary div to decode entities if needed, 
-                 // but direct innerText capture is usually safest to get clean code.
                  const text = el.innerText;
                  el.textContent = text;
              }
 
              el.removeAttribute('data-highlighted');
-             el.classList.remove('hljs'); // Remove class to prevent style stacking
+             el.classList.remove('hljs'); 
              hljs.highlightElement(el);
         });
     }, []);
@@ -229,6 +233,7 @@ export const Editor: React.FC<EditorProps> = ({
         setTags(note.tags || []);
         setIsDirty(false);
         setIsContentFocused(false); 
+        setIsSourceMode(false); // Reset source mode on nav
 
         const safeContent = note.content || '';
         let html = '';
@@ -243,16 +248,9 @@ export const Editor: React.FC<EditorProps> = ({
 
         setEditorContent(viewMode === 'preview' ? safeContent : cleanHtml);
 
-        if (note.deleted) {
-            setViewMode('readOnly');
-        } else {
-            setViewMode('edit');
-        }
-
         if (contentEditableRef.current && viewMode !== 'preview') {
             contentEditableRef.current.innerHTML = cleanHtml;
             attachCopyButtons();
-            // Apply highlighting on load
             applyHighlighting();
         }
     }, [note.id, note.deleted]); 
@@ -403,27 +401,22 @@ export const Editor: React.FC<EditorProps> = ({
             return;
         }
 
-        if (viewMode === 'preview' && mode !== 'preview') {
-            const mdToParse = sourceTextareaRef.current?.value || note.content;
-
-            if (mdToParse !== note.content) {
-                onChange({ content: mdToParse });
+        if (mode === 'edit' || mode === 'readOnly') {
+            // Check if we are coming FROM preview mode
+            if (isSourceMode) {
+                 const mdToParse = sourceTextareaRef.current?.value || note.content;
+                 if (mdToParse !== note.content) {
+                    onChange({ content: mdToParse });
+                 }
+                 const html = marked.parse(mdToParse) as string;
+                 setEditorContent(html);
+                 setIsSourceMode(false);
+                 // The useEffect will handle updating the DOM
             }
-
-            const html = marked.parse(mdToParse) as string;
-            setEditorContent(html);
-
-            if (contentEditableRef.current) {
-                contentEditableRef.current.innerHTML = html;
-                attachCopyButtons();
-            }
-        } else if (viewMode !== 'preview' && mode === 'preview') {
-            const html = contentEditableRef.current?.innerHTML || '';
-            const md = turndownService.turndown(html);
-
-            setEditorContent(md);
+            
+            // Call parent handler
+            onViewModeChange(mode);
         }
-        setViewMode(mode);
     };
 
     const execCmd = (command: string, value: string | undefined = undefined) => {

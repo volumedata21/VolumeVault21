@@ -43,13 +43,13 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(getNoteIdFromPath());
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  
-  // NEW: State for Command Palette
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<'notes' | 'trash'>('notes');
   const [loading, setLoading] = useState(true); 
+  
+  // NEW: Lifted View Mode State (Persists across note switches)
+  const [preferredViewMode, setPreferredViewMode] = useState<'edit' | 'readOnly'>('edit');
   
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [touchEndX, setTouchEndX] = useState<number | null>(null);
@@ -74,7 +74,6 @@ export default function App() {
     }
   });
 
-  // NEW: Centralized Search State
   const [searchTerm, setSearchTerm] = useState('');
 
   const getCurrentNote = () => notes.find(n => n.id === activeNoteId);
@@ -208,10 +207,7 @@ export default function App() {
       });
   };
 
-  // --- NAVIGATION & ROUTING (FIXED) ---
-
   const navigateToDashboard = useCallback(async () => {
-      // FIX: Catch error so navigation proceeds even if save fails
       try {
           await saveCurrentNoteToDisk();
       } catch (e) {
@@ -265,8 +261,6 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []); 
 
-  // --- COMPUTED STATE & FILTERING ---
-
   const visibleNotes = useMemo(() => {
       let filtered = notes;
       if (sidebarView === 'trash') {
@@ -311,7 +305,6 @@ export default function App() {
   };
 
   const handleNoteSelect = async (id: string) => {
-    // FIX: Catch error so navigation proceeds even if save fails
     try {
         await saveCurrentNoteToDisk(); 
     } catch (e) {
@@ -324,7 +317,6 @@ export default function App() {
   };
 
   const handleCreateNote = async () => {
-    // FIX: Catch error
     try {
         await saveCurrentNoteToDisk(); 
     } catch (e) {
@@ -334,7 +326,6 @@ export default function App() {
     const newNote = await noteService.createNote(settings.serverUrl); 
     setNotes(prev => [newNote, ...prev]);
     
-    // Reuse safe handler
     handleNoteSelect(newNote.id); 
     
     setSidebarView('notes'); 
@@ -439,6 +430,9 @@ export default function App() {
                   availableCategories={availableCategories}
                   onRestore={() => handleRestoreNote(activeNoteId!)}
                   onDeleteForever={() => handlePermanentDelete(activeNoteId!)}
+                  // NEW: Pass persistent view mode props
+                  preferredViewMode={preferredViewMode}
+                  onViewModeChange={setPreferredViewMode}
                 />
              </div>
           );
@@ -481,7 +475,6 @@ export default function App() {
               {isDashboardView ? 'Dashboard' : (getCurrentNote()?.title || 'VolumeVault21')} 
             </span>
           </div>
-          {/* NEW: Mobile Command Palette Trigger */}
           <button 
             onClick={() => setIsCommandPaletteOpen(true)} 
             className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full"
@@ -505,7 +498,6 @@ export default function App() {
         onRefreshNotes={loadNotes} 
       />
 
-      {/* NEW: Command Palette Component */}
       <CommandPalette 
         notes={notes}
         isOpen={isCommandPaletteOpen}
@@ -516,7 +508,6 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
-      {/* UNDO TOAST */}
       <div className={`fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 transition-all duration-300 ${showUndoToast ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'}`}>
         <div className="bg-gray-900 dark:bg-white text-white dark:text-gray-900 px-6 py-3 rounded-full shadow-xl flex items-center gap-4">
             <span className="text-sm font-medium">{undoAction?.label || 'Action completed'}</span>
