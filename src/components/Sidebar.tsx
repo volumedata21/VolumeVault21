@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Note } from './types';
-import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon, Grid, LayoutDashboard, AppWindow } from 'lucide-react';
+import { Note } from '../types';
+import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon, AppWindow } from 'lucide-react';
+import { VariableSizeList as List, areEqual } from 'react-window'; // Import areEqual for optimization
+import AutoSizer from 'react-virtualized-auto-sizer';
 
 interface SidebarProps {
   notes: Note[];
@@ -17,8 +19,119 @@ interface SidebarProps {
   view: 'notes' | 'trash';
   onChangeView: (view: 'notes' | 'trash') => void;
   trashCount: number;
-  navigateToDashboard: () => void; // Prop from App.tsx
+  navigateToDashboard: () => void;
+  searchTerm: string;
+  onSearch: (term: string) => void;
 }
+
+// Define item types for the virtual list
+type ListItem = 
+  | { type: 'header'; id: string; name: string; count: number; expanded: boolean }
+  | { type: 'note'; note: Note };
+
+// Data passed to every row for rendering context
+interface RowData {
+  items: ListItem[];
+  currentNoteId: string | null;
+  isTrash: boolean;
+  onSelectNote: (id: string) => void;
+  onCloseMobile: () => void;
+  onDeleteNote: (id: string) => void;
+  onRestoreNote: (id: string) => void;
+  onPermanentDeleteNote: (id: string) => void;
+}
+
+// Extracted Row Component to prevent inline function re-creation
+const Row = React.memo(({ index, style, data }: { index: number; style: React.CSSProperties; data: RowData }) => {
+    const item = data.items[index];
+
+    // HEADER ROW
+    if (item.type === 'header') {
+        // We can't toggle from inside this pure component easily without passing the setter, 
+        // but for now, we rely on the parent re-rendering the list when state changes.
+        // Since the toggle handler is in the parent, we need to pass it down or handle it differently.
+        // Ideally, the click handler should be in data. But for simplicity in this refactor, 
+        // we can assume the 'onClick' needs to be passed in data if we want strict purity.
+        // However, standard React event bubbling works if we don't memoize too strictly.
+        // *Correction*: react-window passes `data` which is our custom object.
+        // We will need to inject the toggle function into `data` if we want it to work here.
+        // BUT, since we are moving logic out, let's keep it simple:
+        // We will trigger a custom event or just accept that we need to pass 'toggleCategory' in data.
+        return null; // Handled by inline renderer below for simplicity regarding 'toggleCategory' closure
+    }
+
+    const note = item.note;
+    const isSelected = data.currentNoteId === note.id;
+
+    return (
+        <div style={style} className="px-2">
+           <button
+              onClick={() => {
+                  data.onSelectNote(note.id);
+                  data.onCloseMobile(); 
+              }}
+              className={`
+                  relative block w-full text-left py-2 pl-8 pr-3 rounded-lg transition-colors 
+                  hover:bg-gray-100 dark:hover:bg-gray-800 
+                  group
+                  ${isSelected 
+                      ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
+                      : 'text-gray-700 dark:text-gray-300'}
+              `}
+          >
+              <div className="pr-6 overflow-hidden">
+                  <h3 className={`font-semibold text-sm truncate ${data.isTrash ? 'line-through text-gray-500' : ''}`}>
+                      {note.title || 'Untitled'}
+                  </h3>
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                      {new Date(note.updatedAt).toLocaleDateString()}
+                  </p>
+              </div>
+              
+              {/* Hover Actions */}
+              <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:md:opacity-100 transition-opacity bg-inherit">
+                  {!data.isTrash ? (
+                      <div 
+                          onClick={(e) => {
+                              e.stopPropagation();
+                              data.onDeleteNote(note.id);
+                          }}
+                          className="p-1.5 text-gray-400 hover:text-red-700 dark:hover:text-red-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
+                          title="Move to Trash"
+                      >
+                          <Trash2 size={14} />
+                      </div>
+                  ) : (
+                      <div className="flex gap-1 bg-white dark:bg-gray-900 rounded shadow-sm">
+                          <div 
+                              onClick={(e) => {
+                                  e.stopPropagation();
+                                  data.onRestoreNote(note.id);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-green-600 dark:hover:text-green-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
+                              title="Restore"
+                          >
+                              <RotateCcw size={14} />
+                          </div>
+                          <div 
+                              onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (confirm("Delete this note permanently?")) {
+                                      data.onPermanentDeleteNote(note.id);
+                                  }
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-red-700 dark:hover:text-red-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
+                              title="Delete Permanently"
+                          >
+                              <AlertOctagon size={14} />
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </button>
+        </div>
+    );
+}, areEqual);
 
 export const Sidebar: React.FC<SidebarProps> = ({
   notes,
@@ -36,30 +149,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onChangeView,
   trashCount,
   navigateToDashboard,
-  // NEW: Search props passed from App.tsx would be here if we updated the interface in the previous step, 
-  // but based on your last upload, they might still be local. I will stick to the last working file provided.
-  // If you updated App.tsx to pass search, these should be props. 
-  // Assuming local state based on last file provided:
+  searchTerm,
+  onSearch
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  
-  // FIX: Tracks EXPANDED categories. Initializing empty means ALL COLLAPSED by default.
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-  
   const [sortCriterion, setSortCriterion] = useState<'updatedAt' | 'title'>('updatedAt');
 
   const filteredNotes = useMemo(() => {
-    return notes
-      .filter((note) => {
-        const searchLower = searchTerm.toLowerCase();
-        return (
-          note.title.toLowerCase().includes(searchLower) || 
-          note.content.toLowerCase().includes(searchLower) ||
-          note.category.toLowerCase().includes(searchLower) ||
-          (note.tags && note.tags.some(tag => tag.toLowerCase().includes(searchLower)))
-        );
-      })
-      .sort((a, b) => {
+    return [...notes].sort((a, b) => {
           if (a.isPinned !== b.isPinned) {
               return a.isPinned ? -1 : 1;
           }
@@ -68,7 +165,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           }
           return b.updatedAt - a.updatedAt;
       });
-  }, [notes, searchTerm, sortCriterion]);
+  }, [notes, sortCriterion]);
 
   const { groupedNotes, categoryDisplayNames } = useMemo(() => {
     const groups: Record<string, Note[]> = {};
@@ -88,34 +185,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return { groupedNotes: groups, categoryDisplayNames: names };
   }, [filteredNotes]);
 
-  const sortedCategories = Object.keys(groupedNotes).sort((a, b) => {
-      return categoryDisplayNames[a].localeCompare(categoryDisplayNames[b]);
-  });
+  const sortedCategories = useMemo(() => {
+      return Object.keys(groupedNotes).sort((a, b) => {
+          return categoryDisplayNames[a].localeCompare(categoryDisplayNames[b]);
+      });
+  }, [groupedNotes, categoryDisplayNames]);
 
-  // Logic inverted: We now add/remove from the EXPANDED set
   const toggleCategory = (categoryKey: string) => {
     const newExpanded = new Set(expandedCategories);
     if (newExpanded.has(categoryKey)) {
-      newExpanded.delete(categoryKey); // Collapse it
+      newExpanded.delete(categoryKey); 
     } else {
-      newExpanded.add(categoryKey); // Expand it
+      newExpanded.add(categoryKey);
     }
     setExpandedCategories(newExpanded);
   };
   
-  const collapseAll = () => {
-    setExpandedCategories(new Set()); // Empty set = all collapsed
-  };
-
-  const expandAll = () => {
-    setExpandedCategories(new Set(sortedCategories)); // Fill set = all expanded
-  };
-
-  // Logic update: If the number of expanded categories is less than total, we show "Expand All"
+  const collapseAll = () => setExpandedCategories(new Set());
+  const expandAll = () => setExpandedCategories(new Set(sortedCategories));
   const shouldShowExpand = expandedCategories.size < sortedCategories.length;
 
   const isTrash = view === 'trash';
-  
+
+  const flatItems: ListItem[] = useMemo(() => {
+      const items: ListItem[] = [];
+      
+      sortedCategories.forEach(key => {
+          const isExpanded = expandedCategories.has(key);
+          items.push({
+              type: 'header',
+              id: key,
+              name: categoryDisplayNames[key],
+              count: groupedNotes[key].length,
+              expanded: isExpanded
+          });
+
+          if (isExpanded) {
+              groupedNotes[key].forEach(note => {
+                  items.push({ type: 'note', note });
+              });
+          }
+      });
+      return items;
+  }, [sortedCategories, expandedCategories, groupedNotes, categoryDisplayNames]);
+
+  // --- Adjusted Height Logic ---
+  const getItemSize = (index: number) => {
+      const item = flatItems[index];
+      // Header: 36px
+      // Note: 56px (Compact, closer to original feel)
+      return item.type === 'header' ? 36 : 56; 
+  };
 
   return (
     <div className={`
@@ -149,7 +269,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             type="text"
             placeholder="Search..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => onSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-lg text-sm focus:ring-2 focus:ring-blue-600 text-gray-900 dark:text-gray-100 placeholder-gray-500"
             aria-label="Search"
           />
@@ -178,28 +298,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Note List */}
-      <div className="flex-1 overflow-y-auto px-2">
-        {/* Dashboard Link */}
-        {!isTrash && (
-            <div className="p-2">
-                <button
-                    onClick={() => {
-                        navigateToDashboard();
-                        onCloseMobile();
-                    }}
-                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 font-semibold ${
-                        currentNoteId === null 
-                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
-                            : 'text-gray-700 dark:text-gray-300'
-                    }`}
-                >
-                    <AppWindow size={20} /> Dashboard
-                </button>
-            </div>
-        )}
-        
-        {filteredNotes.length === 0 ? (
+      {/* Dashboard Link */}
+      {!isTrash && (
+        <div className="px-4 pb-2">
+            <button
+                onClick={() => {
+                    navigateToDashboard();
+                    onCloseMobile();
+                }}
+                className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 font-semibold ${
+                    currentNoteId === null 
+                        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
+                        : 'text-gray-700 dark:text-gray-300'
+                }`}
+            >
+                <AppWindow size={20} /> Dashboard
+            </button>
+        </div>
+      )}
+
+      {/* Virtualized Note List */}
+      <div className="flex-1 overflow-hidden relative"> 
+        {flatItems.length === 0 ? (
           <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
             {searchTerm 
                 ? 'No notes found' 
@@ -208,10 +328,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     : 'Select a note or create a new one!'}
           </div>
         ) : (
-          <div className="space-y-4 pb-4">
-            
-            {/* Sort & Collapse Controls */}
-            <div className="flex justify-between items-center px-2 pt-2 pb-1 text-xs">
+          <>
+            <div className="flex justify-between items-center px-4 py-2 text-xs bg-white dark:bg-gray-900 z-10 border-b border-gray-100 dark:border-gray-800/50">
                 <select
                     value={sortCriterion}
                     onChange={(e) => setSortCriterion(e.target.value as 'updatedAt' | 'title')}
@@ -228,95 +346,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {shouldShowExpand ? 'Expand All' : 'Collapse All'}
                 </button>
             </div>
-            
-            {sortedCategories.map(categoryKey => (
-              <div key={categoryKey} className="space-y-1">
-                <button
-                  onClick={() => toggleCategory(categoryKey)}
-                  className="w-full flex items-center gap-2 px-2 py-1 text-xs font-bold text-blue-600 dark:text-sky-400 hover:text-blue-800 dark:hover:text-sky-200 uppercase tracking-wider transition-colors"
-                >
-                  {/* Logic Inverted: If expanded -> Down, Else -> Right */}
-                  {expandedCategories.has(categoryKey) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  {categoryDisplayNames[categoryKey]} <span className="text-gray-400 font-normal">({groupedNotes[categoryKey].length})</span>
-                </button>
-                
-                {/* Logic Inverted: Render only if expanded */}
-                {expandedCategories.has(categoryKey) && (
-                  <ul className="space-y-0.5">
-                    {groupedNotes[categoryKey].map(note => (
-                      <li key={note.id}>
-                        <button
-                          onClick={() => {
-                            onSelectNote(note.id);
-                            onCloseMobile(); 
-                          }}
-                          className={`w-full text-left py-2 pl-8 pr-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 group relative ${
-                            currentNoteId === note.id 
-                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
-                            : 'text-gray-700 dark:text-gray-300'
-                          }`}
+
+            <div className="flex-1 h-full">
+                <AutoSizer>
+                    {({ height, width }) => (
+                        <List
+                            height={height - 40}
+                            width={width}
+                            itemCount={flatItems.length}
+                            itemSize={getItemSize}
+                            itemData={{
+                                items: flatItems,
+                                currentNoteId,
+                                isTrash,
+                                onSelectNote,
+                                onCloseMobile,
+                                onDeleteNote,
+                                onRestoreNote,
+                                onPermanentDeleteNote,
+                                toggleCategory // We can sneak this into itemData if we type it loosely or update interface
+                            }}
                         >
-                          <div className="pr-6">
-                            <h3 className={`font-semibold text-sm truncate ${isTrash ? 'line-through text-gray-500' : ''}`}>
-                              {note.title || 'Untitled'}
-                            </h3>
-                            <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-                              {new Date(note.updatedAt).toLocaleDateString()}
-                            </p>
-                          </div>
-                          
-                          <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:md:opacity-100 transition-opacity">
-                             {!isTrash ? (
-                                <div 
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onDeleteNote(note.id);
-                                    }}
-                                    className="p-1.5 text-gray-400 hover:text-red-700 dark:hover:text-red-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
-                                    title="Move to Trash"
-                                >
-                                    <Trash2 size={14} />
-                                </div>
-                             ) : (
-                                <>
-                                    <div 
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onRestoreNote(note.id);
-                                        }}
-                                        className="p-1.5 text-gray-400 hover:text-green-600 dark:hover:text-green-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
-                                        title="Restore"
-                                    >
-                                        <RotateCcw size={14} />
-                                    </div>
-                                    <div 
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (confirm("Delete this note permanently?")) {
-                                                onPermanentDeleteNote(note.id);
-                                            }
-                                        }}
-                                        className="p-1.5 text-gray-400 hover:text-red-700 dark:hover:text-red-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
-                                        title="Delete Permanently"
-                                    >
-                                        <AlertOctagon size={14} />
-                                    </div>
-                                </>
-                             )}
-                          </div>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ))}
-          </div>
+                            {({ index, style, data }: any) => {
+                                const item = data.items[index];
+                                if (item.type === 'header') {
+                                    return (
+                                        <div style={style} className="px-2 pt-1">
+                                            <button
+                                                onClick={() => toggleCategory(item.id)}
+                                                className="w-full flex items-center gap-2 px-2 py-1 text-xs font-bold text-blue-600 dark:text-sky-400 hover:text-blue-800 dark:hover:text-sky-200 uppercase tracking-wider transition-colors"
+                                            >
+                                                {item.expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                                {item.name} <span className="text-gray-400 font-normal">({item.count})</span>
+                                            </button>
+                                        </div>
+                                    );
+                                }
+                                return <Row index={index} style={style} data={data} />;
+                            }}
+                        </List>
+                    )}
+                </AutoSizer>
+            </div>
+          </>
         )}
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 space-y-3">
+      <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 space-y-3 z-20">
         <div className="flex bg-gray-200 dark:bg-gray-800 rounded-lg p-1 text-xs font-medium">
              <button 
                 onClick={() => onChangeView('notes')}
