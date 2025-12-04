@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Note } from '../types';
 import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon, AppWindow } from 'lucide-react';
-import { VariableSizeList as List, areEqual } from 'react-window'; // Import areEqual for optimization
+import { VariableSizeList as List, areEqual } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
 
 interface SidebarProps {
@@ -29,7 +29,6 @@ type ListItem =
   | { type: 'header'; id: string; name: string; count: number; expanded: boolean }
   | { type: 'note'; note: Note };
 
-// Data passed to every row for rendering context
 interface RowData {
   items: ListItem[];
   currentNoteId: string | null;
@@ -41,23 +40,11 @@ interface RowData {
   onPermanentDeleteNote: (id: string) => void;
 }
 
-// Extracted Row Component to prevent inline function re-creation
 const Row = React.memo(({ index, style, data }: { index: number; style: React.CSSProperties; data: RowData }) => {
     const item = data.items[index];
 
-    // HEADER ROW
     if (item.type === 'header') {
-        // We can't toggle from inside this pure component easily without passing the setter, 
-        // but for now, we rely on the parent re-rendering the list when state changes.
-        // Since the toggle handler is in the parent, we need to pass it down or handle it differently.
-        // Ideally, the click handler should be in data. But for simplicity in this refactor, 
-        // we can assume the 'onClick' needs to be passed in data if we want strict purity.
-        // However, standard React event bubbling works if we don't memoize too strictly.
-        // *Correction*: react-window passes `data` which is our custom object.
-        // We will need to inject the toggle function into `data` if we want it to work here.
-        // BUT, since we are moving logic out, let's keep it simple:
-        // We will trigger a custom event or just accept that we need to pass 'toggleCategory' in data.
-        return null; // Handled by inline renderer below for simplicity regarding 'toggleCategory' closure
+        return null; // Handled by inline renderer below
     }
 
     const note = item.note;
@@ -73,7 +60,7 @@ const Row = React.memo(({ index, style, data }: { index: number; style: React.CS
               className={`
                   relative block w-full text-left py-2 pl-8 pr-3 rounded-lg transition-colors 
                   hover:bg-gray-100 dark:hover:bg-gray-800 
-                  group
+                  group overflow-hidden
                   ${isSelected 
                       ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
                       : 'text-gray-700 dark:text-gray-300'}
@@ -89,20 +76,20 @@ const Row = React.memo(({ index, style, data }: { index: number; style: React.CS
               </div>
               
               {/* Hover Actions */}
-              <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:md:opacity-100 transition-opacity bg-inherit">
+              <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:md:opacity-100 transition-opacity bg-inherit z-10">
                   {!data.isTrash ? (
                       <div 
                           onClick={(e) => {
                               e.stopPropagation();
                               data.onDeleteNote(note.id);
                           }}
-                          className="p-1.5 text-gray-400 hover:text-red-700 dark:hover:text-red-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
+                          className="p-1.5 text-gray-400 hover:text-red-700 dark:hover:text-red-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm shadow-sm"
                           title="Move to Trash"
                       >
                           <Trash2 size={14} />
                       </div>
                   ) : (
-                      <div className="flex gap-1 bg-white dark:bg-gray-900 rounded shadow-sm">
+                      <div className="flex gap-1 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm rounded shadow-sm p-0.5">
                           <div 
                               onClick={(e) => {
                                   e.stopPropagation();
@@ -229,12 +216,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return items;
   }, [sortedCategories, expandedCategories, groupedNotes, categoryDisplayNames]);
 
-  // --- Adjusted Height Logic ---
   const getItemSize = (index: number) => {
       const item = flatItems[index];
       // Header: 36px
-      // Note: 56px (Compact, closer to original feel)
-      return item.type === 'header' ? 36 : 56; 
+      // Note: 60px (slightly adjusted to accommodate padding and prevent overlap)
+      return item.type === 'header' ? 36 : 60; 
   };
 
   return (
@@ -363,8 +349,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 onCloseMobile,
                                 onDeleteNote,
                                 onRestoreNote,
-                                onPermanentDeleteNote,
-                                toggleCategory // We can sneak this into itemData if we type it loosely or update interface
+                                onPermanentDeleteNote
                             }}
                         >
                             {({ index, style, data }: any) => {
