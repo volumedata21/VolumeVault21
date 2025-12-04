@@ -11,6 +11,8 @@ import { marked } from 'marked';
 // @ts-ignore
 import TurndownService from 'turndown';
 import DOMPurify from 'isomorphic-dompurify';
+import hljs from 'highlight.js';
+import 'highlight.js/styles/atom-one-dark.css'; 
 
 // SVG Checkmark (White) - URL Encoded for CSS
 const CHECKMARK_SVG = `data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e`;
@@ -41,7 +43,6 @@ renderer.listitem = function (item: any) {
         const cleanText = text.replace(/^<input[^>]+>\s*/, '');
 
         // CUSTOM CHECKBOX HTML
-        // 'absolute -left-6' puts the box in the padding gutter, aligning text with bullets/numbers
         return `<li class="checklist-item" style="list-style: none; position: relative; margin-bottom: 0.25rem;">
       <input type="checkbox" ${checked ? 'checked' : ''} 
              class="
@@ -125,7 +126,7 @@ export const Editor: React.FC<EditorProps> = ({
             codeBlockStyle: 'fenced'
         });
 
-        // IMPROVED CHECKLIST RULE (Prevents Ghost Items)
+        // Checklist Rule
         service.addRule('checklistItems', {
             filter: function (node: HTMLElement) {
                 return node.nodeName === 'LI' && node.classList.contains('checklist-item');
@@ -133,10 +134,8 @@ export const Editor: React.FC<EditorProps> = ({
             replacement: function (_content: string, node: HTMLElement) {
                 const checkbox = node.querySelector('input[type="checkbox"]') as HTMLInputElement;
                 const isChecked = checkbox?.checked;
-                
                 const span = node.querySelector('span');
                 const text = span ? span.textContent?.trim() : node.textContent?.trim();
-                
                 return (isChecked ? '- [x] ' : '- [ ] ') + (text || '') + '\n';
             }
         });
@@ -177,7 +176,6 @@ export const Editor: React.FC<EditorProps> = ({
             replacement: function (_content: any, node: any) {
                 const alt = node.alt || 'Image';
                 const src = node.getAttribute('src') || '';
-
                 if (src && src.startsWith('/uploads')) {
                     return `![${alt}](${src})`;
                 }
@@ -185,6 +183,43 @@ export const Editor: React.FC<EditorProps> = ({
             }
         });
         return service;
+    }, []);
+
+    // --- Helper to Apply Highlighting and Fix DOM Structure ---
+    const applyHighlighting = useCallback(() => {
+        if (!contentEditableRef.current) return;
+        
+        // 1. Fix raw <pre> tags and recover newlines from HTML
+        contentEditableRef.current.querySelectorAll('pre').forEach((pre) => {
+            if (!pre.querySelector('code')) {
+                 // FIX: Use innerText to preserve newlines from <div> or <br> tags
+                 const rawText = pre.innerText || ''; 
+                 
+                 const code = document.createElement('code');
+                 code.textContent = rawText; // Safe set preventing XSS
+                 
+                 pre.innerHTML = '';
+                 pre.appendChild(code);
+            }
+        });
+
+        // 2. Apply Highlight.js to all code blocks
+        contentEditableRef.current.querySelectorAll('pre code').forEach((block) => {
+             const el = block as HTMLElement;
+             
+             // FIX: If the block contains HTML <br> tags (from editing), convert them to \n
+             // This ensures HLJS sees the structure as multi-line code.
+             if (el.innerHTML.includes('<br')) {
+                 // Use a temporary div to decode entities if needed, 
+                 // but direct innerText capture is usually safest to get clean code.
+                 const text = el.innerText;
+                 el.textContent = text;
+             }
+
+             el.removeAttribute('data-highlighted');
+             el.classList.remove('hljs'); // Remove class to prevent style stacking
+             hljs.highlightElement(el);
+        });
     }, []);
 
     // Initialize state when note changes
@@ -204,7 +239,6 @@ export const Editor: React.FC<EditorProps> = ({
             html = '<p>Error loading content.</p>';
         }
 
-        // --- SECURITY FIX: Sanitize HTML before rendering ---
         const cleanHtml = DOMPurify.sanitize(html);
 
         setEditorContent(viewMode === 'preview' ? safeContent : cleanHtml);
@@ -218,6 +252,8 @@ export const Editor: React.FC<EditorProps> = ({
         if (contentEditableRef.current && viewMode !== 'preview') {
             contentEditableRef.current.innerHTML = cleanHtml;
             attachCopyButtons();
+            // Apply highlighting on load
+            applyHighlighting();
         }
     }, [note.id, note.deleted]); 
 
@@ -259,8 +295,9 @@ export const Editor: React.FC<EditorProps> = ({
     useEffect(() => {
         if (viewMode !== 'preview') {
             attachCopyButtons();
+            applyHighlighting();
         }
-    }, [editorContent, viewMode, attachCopyButtons]);
+    }, [editorContent, viewMode, attachCopyButtons, applyHighlighting]);
 
     // Mark dirty
     useEffect(() => {
@@ -301,7 +338,6 @@ export const Editor: React.FC<EditorProps> = ({
         if (viewMode === 'preview') {
             contentToSave = sourceTextareaRef.current?.value || '';
         } else {
-            // Sync Checkbox Attributes before saving
             if (contentEditableRef.current) {
                 const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach((cb: any) => {
@@ -316,7 +352,6 @@ export const Editor: React.FC<EditorProps> = ({
             contentToSave = turndownService.turndown(html);
         }
 
-        // Force save to disk on manual save
         onChange({ title, category, tags, content: contentToSave }, true);
         onSave();
         setIsDirty(false);
@@ -346,6 +381,18 @@ export const Editor: React.FC<EditorProps> = ({
         const val = e.target.value;
         setEditorContent(val);
         setIsDirty(true);
+    };
+
+    const handlePaste = () => {
+        setTimeout(() => {
+            applyHighlighting();
+            handleVisualInput();
+        }, 50);
+    };
+
+    const handleBlur = () => {
+        applyHighlighting();
+        handleContentBlur();
     };
 
     const toggleViewMode = (mode: 'edit' | 'preview' | 'readOnly') => {
@@ -703,7 +750,6 @@ export const Editor: React.FC<EditorProps> = ({
                             selection.removeAllRanges();
                             selection.addRange(newRange);
                         } else {
-                            // --- CORRECTED CHECKLIST CREATION LOGIC ---
                             const newLi = document.createElement('li');
                             newLi.className = 'checklist-item';
                             // Match the 'relative' positioning used in renderer.listitem
@@ -859,7 +905,7 @@ export const Editor: React.FC<EditorProps> = ({
 
     return (
         <div className="h-full flex flex-col bg-white dark:bg-gray-900 relative">
-            {/* FIX: Added custom CSS for checked checkbox background image */}
+            {/* FIX: Added custom CSS for checked checkbox background image AND Syntax Highlighting Fixes */}
             <style>{`
                 .task-checkbox:checked {
                     background-image: url("${CHECKMARK_SVG}");
@@ -867,6 +913,36 @@ export const Editor: React.FC<EditorProps> = ({
                     background-repeat: no-repeat;
                     background-size: 100%;
                 }
+                
+                /* FIX 1: Remove double-box effect. Make Highlight.js background transparent */
+                .hljs {
+                    background: transparent !important;
+                    padding: 0 !important;
+                }
+
+                /* FIX 2: Force Highlight.js colors to override Tailwind Typography (prose) grey text */
+                .prose pre code {
+                    background-color: transparent !important;
+                    color: inherit !important; 
+                    font-family: monospace;
+                    /* FIX 4: Wrap Code - pre-wrap preserves newlines but wraps long lines */
+                    white-space: pre-wrap !important;
+                    word-break: break-word !important;
+                }
+                
+                .prose pre {
+                    /* FIX 4: Wrap Code Container */
+                    white-space: pre-wrap !important;
+                    word-break: break-word !important;
+                    overflow-x: hidden !important;
+                }
+                
+                /* FIX 3: Ensure syntax colors are visible against dark background */
+                .hljs-string { color: #98c379 !important; }
+                .hljs-attr { color: #d19a66 !important; }
+                .hljs-keyword { color: #c678dd !important; }
+                .hljs-number { color: #d19a66 !important; }
+                .hljs-comment { color: #5c6370 !important; font-style: italic; }
             `}</style>
             
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
@@ -1100,6 +1176,8 @@ export const Editor: React.FC<EditorProps> = ({
                         onDragOver={handleDragPrevent} 
                         onDragEnter={handleDragPrevent}
                         onDrop={handleDrop}
+                        onPaste={handlePaste}
+                        onBlur={handleBlur}
                     >
                         <div
                             ref={contentEditableRef}
