@@ -58,6 +58,10 @@ const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
     return 0; 
 };
 
+// SVG Checkmark for Dashboard Preview
+const CHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-blue-600 dark:text-blue-400 align-middle"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
+const UNCHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-gray-400 dark:text-gray-500 align-middle"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
+
 // Utility: DOMParser-based stripper
 const processNoteContent = (html: string) => {
   if (!html) return { imageUrl: null, headingLevel: 0, headingLine: '', bodyPreview: '' };
@@ -138,7 +142,8 @@ const processNoteContent = (html: string) => {
                        const checkbox = child.querySelector('input[type="checkbox"]');
                        if (checkbox) {
                            const checked = checkbox.hasAttribute('checked');
-                           bodyPreview += checked ? '<span class="font-bold text-blue-600 dark:text-blue-400">▣</span> ' : '<span class="text-gray-400 dark:text-gray-500">▢</span> ';
+                           // Use SVG Icons for Checkboxes
+                           bodyPreview += checked ? CHECKED_SVG : UNCHECKED_SVG;
                            child.childNodes.forEach(c => { if (c.nodeName !== 'INPUT') walk(c); });
                        } else {
                            bodyPreview += '• ';
@@ -154,7 +159,6 @@ const processNoteContent = (html: string) => {
               return;
           }
           
-          // Handle Links
           if (tagName === 'a') {
               const href = el.getAttribute('href');
               if (href) {
@@ -232,7 +236,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return activeNotes.map(note => {
       const safeContent = note.content || ''; 
       let htmlContent = '';
-      try { htmlContent = marked.parse(safeContent, { breaks: true }) as string; } catch (e) { htmlContent = '<i>Error</i>'; }
+      try { 
+          htmlContent = marked.parse(safeContent, { breaks: true }) as string; 
+      } catch (e) { htmlContent = '<i>Error</i>'; }
       
       const { imageUrl, headingLevel, headingLine, bodyPreview } = processNoteContent(htmlContent);
       
@@ -277,7 +283,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
             const isSelected = selectedIds.has(note.id);
             const isDark = isDarkColor(note.color);
             
-            // Determine Border Color (5% lighter)
             const borderColor = note.color 
                 ? lightenColor(note.color, 5) 
                 : undefined;
@@ -287,7 +292,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
               key={note.id}
               className={`group relative flex flex-col justify-between rounded-lg shadow-md transition-all duration-200 border border-gray-200 dark:border-gray-700 h-full min-h-[180px] overflow-hidden ${isSelected ? 'ring-2 ring-blue-600 ring-offset-2 dark:ring-offset-gray-900' : 'hover:shadow-lg'}`}
               style={{ 
-                  // FIX: Gradient Background with 75% opacity (BF) on the color stop
                   background: note.color ? `linear-gradient(to bottom, #121826, ${note.color}BF)` : undefined,
                   backgroundColor: note.color ? undefined : undefined,
                   borderColor: borderColor || undefined
@@ -305,7 +309,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   )}
                   
                   <div className="p-4 pb-0"> 
-                      <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${note.isPinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                      {/* FIX: Pin Button Visibility for Touch */}
+                      {/* Logic: Opacity-100 (Always visible) on mobile. On desktop (md:), opacity-0 unless hovered. */}
+                      <div className={`absolute top-2 right-2 z-10 transition-opacity p-1 rounded-full ${note.isPinned ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
                           <button
                               onClick={(e) => { e.stopPropagation(); onPinNote(note.id); }}
                               className={`p-1 rounded-full hover:bg-black/10 transition-colors ${note.isPinned ? (isDark ? 'text-white' : 'text-blue-600') : (isDark ? 'text-white/50 hover:text-white' : 'text-gray-400 hover:text-blue-600')}`}
@@ -344,8 +350,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             isSelected 
                                 ? 'bg-blue-600 border-blue-600' 
                                 : (note.color 
-                                    ? 'bg-transparent border-white/80 hover:border-white' 
-                                    : 'bg-transparent border-gray-400 dark:border-gray-500 hover:border-blue-400')
+                                    ? 'bg-transparent border-white/70 hover:border-white hover:bg-white/10' 
+                                    : 'bg-transparent border-gray-400 dark:border-gray-500 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20')
                         }`}
                         onClick={(e) => { e.stopPropagation(); toggleSelection(note.id); }}
                       >
@@ -357,7 +363,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                   </div>
 
-                  <div className={`transition-opacity ${activeMenuId === note.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                  {/* FIX: More Button Visibility for Touch */}
+                  {/* Logic: Opacity-100 (Always visible) on mobile. On desktop (md:), opacity-0 unless hovered. */}
+                  <div className={`transition-opacity ${activeMenuId === note.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
                       <div className="relative">
                           <button
                               onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === note.id ? null : note.id); }}
@@ -397,6 +405,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           )})}
       </div>
 
+      {/* ... Bulk Actions & Modals ... */}
       {isSelectionMode && (
           <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 rounded-full px-6 py-3 flex items-center gap-6 z-50">
               <span className="text-sm font-bold text-gray-500">{selectedIds.size} selected</span>
@@ -444,7 +453,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       )}
 
-      {/* ... Modals ... */}
       {showCategoryModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-sm shadow-xl">

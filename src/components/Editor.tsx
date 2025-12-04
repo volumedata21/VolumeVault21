@@ -11,10 +11,13 @@ import { marked } from 'marked';
 // @ts-ignore
 import TurndownService from 'turndown';
 
+// SVG Checkmark (White) - URL Encoded for CSS
+const CHECKMARK_SVG = `data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e`;
+
 // Configure Marked globally
 const renderer = new marked.Renderer();
 
-// Override List Item to support checkboxes
+// Override List Item to support CUSTOM STYLED checkboxes
 // @ts-ignore
 renderer.listitem = function (item: any) {
     let text = '';
@@ -35,8 +38,22 @@ renderer.listitem = function (item: any) {
 
     if (task) {
         const cleanText = text.replace(/^<input[^>]+>\s*/, '');
+
+        // CUSTOM CHECKBOX HTML
+        // Note: We removed the inline style for background-image.
+        // It is now handled by the <style> block in the component using the .task-checkbox:checked selector.
         return `<li class="checklist-item" style="list-style: none; display: flex; align-items: flex-start; margin-bottom: 0.25rem;">
-      <input type="checkbox" ${checked ? 'checked' : ''} style="margin-top: 0.35rem; margin-right: 0.5rem; flex-shrink: 0; cursor: pointer;">
+      <input type="checkbox" ${checked ? 'checked' : ''} 
+             class="
+                task-checkbox
+                appearance-none h-5 w-5 border-2 border-sky-400 dark:border-sky-500 rounded-md bg-transparent
+                hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/30 dark:hover:border-sky-400
+                checked:bg-sky-600 checked:border-sky-600 dark:checked:bg-sky-500 dark:checked:border-sky-500
+                focus:ring-2 focus:ring-sky-400 focus:outline-none
+                cursor-pointer transition-all duration-200 ease-in-out
+                flex-shrink-0 mt-0.5 mr-2
+             "
+      >
       <span style="flex: 1; min-width: 0; ${checked ? 'text-decoration: line-through; opacity: 0.6; color: #6b7280;' : ''}">${cleanText}</span>
     </li>`;
     }
@@ -275,6 +292,7 @@ export const Editor: React.FC<EditorProps> = ({
         if (viewMode === 'preview') {
             contentToSave = sourceTextareaRef.current?.value || '';
         } else {
+            // Sync Checkbox Attributes before saving
             if (contentEditableRef.current) {
                 const checkboxes = contentEditableRef.current.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach((cb: any) => {
@@ -289,6 +307,7 @@ export const Editor: React.FC<EditorProps> = ({
             contentToSave = turndownService.turndown(html);
         }
 
+        // Force save to disk on manual save
         onChange({ title, category, tags, content: contentToSave }, true);
         onSave();
         setIsDirty(false);
@@ -806,10 +825,17 @@ export const Editor: React.FC<EditorProps> = ({
     };
 
     return (
-        <div 
-            className="h-full flex flex-col bg-white dark:bg-gray-900 relative"
-            // FIX: Removed the style prop that applied background color
-        >
+        <div className="h-full flex flex-col bg-white dark:bg-gray-900 relative">
+            {/* FIX: Added custom CSS for checked checkbox background image */}
+            <style>{`
+                .task-checkbox:checked {
+                    background-image: url("${CHECKMARK_SVG}");
+                    background-position: center;
+                    background-repeat: no-repeat;
+                    background-size: 100%;
+                }
+            `}</style>
+            
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
 
             {/* TRASH BANNER */}
