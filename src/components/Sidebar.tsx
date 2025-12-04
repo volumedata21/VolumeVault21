@@ -219,7 +219,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const getItemSize = (index: number) => {
       const item = flatItems[index];
       // Header: 36px
-      // Note: 60px (slightly adjusted to accommodate padding and prevent overlap)
+      // Note: 60px
       return item.type === 'header' ? 36 : 60; 
   };
 
@@ -229,8 +229,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       md:relative md:translate-x-0
     `}>
-      {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
+      {/* Header - Centered Title */}
+      <div className="relative p-4 border-b border-gray-200 dark:border-gray-800 flex justify-center items-center">
         <button 
             onClick={isTrash ? undefined : navigateToDashboard}
             className={`
@@ -242,7 +242,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           {isTrash ? 'Trash Bin' : 'VolumeVault21'}
         </button>
-        <button onClick={onCloseMobile} className="md:hidden p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400">
+        
+        {/* Mobile Close Button - Absolutely positioned to right */}
+        <button 
+            onClick={onCloseMobile} 
+            className="md:hidden absolute right-4 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400"
+        >
           <X size={20} />
         </button>
       </div>
@@ -264,7 +269,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {!isTrash ? (
             <button
             onClick={onCreateNote}
-            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-800 hover:to-indigo-700 text-white py-2 px-4 rounded-lg text-sm font-bold transition-all shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-700 dark:ring-offset-gray-900"
+            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-800 hover:to-indigo-700 text-white py-3 px-4 rounded-lg text-sm font-bold transition-all shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-700 dark:ring-offset-gray-900"
             >
             <Plus size={16} />
             New Note
@@ -276,7 +281,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onEmptyTrash();
                     }
                 }}
-                className="w-full flex items-center justify-center gap-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 py-2 px-4 rounded-lg text-sm font-bold transition-all border border-red-200 dark:border-red-800"
+                className="w-full flex items-center justify-center gap-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 py-3 px-4 rounded-lg text-sm font-bold transition-all border border-red-200 dark:border-red-800"
             >
                 <Trash2 size={16} />
                 Empty Trash
@@ -284,7 +289,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Dashboard Link */}
+      {/* Dashboard Link - Centered Content */}
       {!isTrash && (
         <div className="px-4 pb-2">
             <button
@@ -292,7 +297,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     navigateToDashboard();
                     onCloseMobile();
                 }}
-                className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 font-semibold ${
+                className={`w-full flex items-center justify-center gap-3 p-3 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 font-semibold ${
                     currentNoteId === null 
                         ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
                         : 'text-gray-700 dark:text-gray-300'
