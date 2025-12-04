@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { SettingsModal } from './components/SettingsModal';
+import { CommandPalette } from './components/CommandPalette';
 import { Note, AppSettings } from './types';
 import { noteService } from './services/noteService';
-import { Menu, RefreshCw, Undo2, X } from 'lucide-react';
+import { Menu, RefreshCw, Undo2, X, Search } from 'lucide-react';
 import { Dashboard } from './components/Dashboard'; 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -42,6 +43,10 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(getNoteIdFromPath());
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  // NEW: State for Command Palette
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<'notes' | 'trash'>('notes');
   const [loading, setLoading] = useState(true); 
@@ -469,12 +474,22 @@ export default function App() {
       />
       
       <div className="flex-1 flex flex-col min-w-0" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}> 
-        <div className="md:hidden sticky top-0 z-40 flex items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md">
-          <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 mr-2 text-gray-600 dark:text-gray-400"><Menu size={24} /></button>
-          <span onClick={isDashboardView ? undefined : navigateToDashboard} className={`font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r cursor-pointer ${isDashboardView ? '' : 'hover:opacity-80 transition-opacity'}`} style={{backgroundImage: 'linear-gradient(to right, #DD3D2D, #F67E4B)'}}>
-            {isDashboardView ? 'Dashboard' : (getCurrentNote()?.title || 'VolumeVault21')} 
-          </span>
+        <div className="md:hidden sticky top-0 z-40 flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md">
+          <div className="flex items-center">
+            <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 mr-2 text-gray-600 dark:text-gray-400"><Menu size={24} /></button>
+            <span onClick={isDashboardView ? undefined : navigateToDashboard} className={`font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r cursor-pointer ${isDashboardView ? '' : 'hover:opacity-80 transition-opacity'}`} style={{backgroundImage: 'linear-gradient(to right, #DD3D2D, #F67E4B)'}}>
+              {isDashboardView ? 'Dashboard' : (getCurrentNote()?.title || 'VolumeVault21')} 
+            </span>
+          </div>
+          {/* NEW: Mobile Command Palette Trigger */}
+          <button 
+            onClick={() => setIsCommandPaletteOpen(true)} 
+            className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full"
+          >
+            <Search size={20} />
+          </button>
         </div>
+        
         <div id="main-editor-content" className="flex-1 overflow-y-auto relative">
            {isSidebarOpen && <div className="fixed inset-0 z-20 md:hidden bg-black/50 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>}
            {contentToRender()} 
@@ -488,6 +503,17 @@ export default function App() {
         onUpdateSettings={handleUpdateSettings}
         onExport={handleExport}
         onRefreshNotes={loadNotes} 
+      />
+
+      {/* NEW: Command Palette Component */}
+      <CommandPalette 
+        notes={notes}
+        isOpen={isCommandPaletteOpen}
+        onOpenChange={setIsCommandPaletteOpen}
+        onSelectNote={handleNoteSelect}
+        onCreateNote={handleCreateNote}
+        onNavigateDashboard={navigateToDashboard}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {/* UNDO TOAST */}
