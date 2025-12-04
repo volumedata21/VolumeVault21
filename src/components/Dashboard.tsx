@@ -3,6 +3,7 @@ import { Note } from '../types';
 import { Plus, Triangle, MoreVertical, Copy, Trash2, Palette, Folder, Tag, Check, CircleOff } from 'lucide-react';
 // @ts-ignore
 import { marked } from 'marked';
+import DOMPurify from 'isomorphic-dompurify';
 
 interface DashboardProps {
   notes: Note[];
@@ -62,12 +63,15 @@ const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
     return 0; 
 };
 
-// Utility: DOMParser-based stripper
+// Utility: DOMParser-based stripper with Sanitization
 const processNoteContent = (html: string) => {
   if (!html) return { imageUrl: null, headingLevel: 0, headingLine: '', bodyPreview: '' };
 
+  // --- SECURITY FIX: Sanitize before parsing to prevent XSS in previews ---
+  const cleanHtml = DOMPurify.sanitize(html);
+
   const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+  const doc = parser.parseFromString(cleanHtml, 'text/html');
   
   // 1. Extract Cover Image
   const img = doc.querySelector('img');

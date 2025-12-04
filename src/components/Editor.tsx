@@ -10,6 +10,7 @@ import {
 import { marked } from 'marked';
 // @ts-ignore
 import TurndownService from 'turndown';
+import DOMPurify from 'isomorphic-dompurify';
 
 // SVG Checkmark (White) - URL Encoded for CSS
 const CHECKMARK_SVG = `data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e`;
@@ -124,9 +125,7 @@ export const Editor: React.FC<EditorProps> = ({
             codeBlockStyle: 'fenced'
         });
 
-        // FIX: Improved Checklist Rule to prevent "ghost" items
-        // Targets the LI container directly instead of the input, ensuring 
-        // the entire line is reconstructed as standard markdown.
+        // IMPROVED CHECKLIST RULE (Prevents Ghost Items)
         service.addRule('checklistItems', {
             filter: function (node: HTMLElement) {
                 return node.nodeName === 'LI' && node.classList.contains('checklist-item');
@@ -135,7 +134,6 @@ export const Editor: React.FC<EditorProps> = ({
                 const checkbox = node.querySelector('input[type="checkbox"]') as HTMLInputElement;
                 const isChecked = checkbox?.checked;
                 
-                // Extract text from the span to avoid grabbing input values or extra whitespace
                 const span = node.querySelector('span');
                 const text = span ? span.textContent?.trim() : node.textContent?.trim();
                 
@@ -206,7 +204,10 @@ export const Editor: React.FC<EditorProps> = ({
             html = '<p>Error loading content.</p>';
         }
 
-        setEditorContent(viewMode === 'preview' ? safeContent : html);
+        // --- SECURITY FIX: Sanitize HTML before rendering ---
+        const cleanHtml = DOMPurify.sanitize(html);
+
+        setEditorContent(viewMode === 'preview' ? safeContent : cleanHtml);
 
         if (note.deleted) {
             setViewMode('readOnly');
@@ -215,7 +216,7 @@ export const Editor: React.FC<EditorProps> = ({
         }
 
         if (contentEditableRef.current && viewMode !== 'preview') {
-            contentEditableRef.current.innerHTML = html;
+            contentEditableRef.current.innerHTML = cleanHtml;
             attachCopyButtons();
         }
     }, [note.id, note.deleted]); 
@@ -702,12 +703,13 @@ export const Editor: React.FC<EditorProps> = ({
                             selection.removeAllRanges();
                             selection.addRange(newRange);
                         } else {
+                            // --- CORRECTED CHECKLIST CREATION LOGIC ---
                             const newLi = document.createElement('li');
                             newLi.className = 'checklist-item';
-                            // UPDATED: Match the 'relative' positioning used in renderer.listitem
+                            // Match the 'relative' positioning used in renderer.listitem
                             newLi.style.cssText = 'list-style: none; position: relative; margin-bottom: 0.25rem;';
                             
-                            // UPDATED: Apply the full set of Tailwind classes to the input
+                            // Apply the full set of Tailwind classes to the input
                             newLi.innerHTML = `
                                 <input type="checkbox" class="
                                     task-checkbox
