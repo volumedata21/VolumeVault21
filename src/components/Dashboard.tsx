@@ -31,15 +31,9 @@ const NOTE_COLORS = [
   { name: 'Ocean', value: '#1F7A7A' },         
 ];
 
-// Helper to lighten a hex color by % (for border calculation)
-const lightenColor = (color: string, percent: number) => {
-    const num = parseInt(color.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) + amt;
-    const G = (num >> 8 & 0x00FF) + amt;
-    const B = (num & 0x0000FF) + amt;
-    return '#' + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
-};
+// FIX: Reduced size from 14px to 10px (~70%)
+const CHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-blue-600 dark:text-blue-400 align-middle"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
+const UNCHECKED_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-1 text-gray-400 dark:text-gray-500 align-middle"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
 
 const decodeHTMLEntities = (text: string): string => {
     try {
@@ -58,6 +52,16 @@ const getLeadingHeadingLevel = (html: string): 0 | 1 | 2 | 3 => {
     return 0; 
 };
 
+// Helper to lighten a hex color by % (for border calculation)
+const lightenColor = (color: string, percent: number) => {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    return '#' + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
+};
+
 // Utility: DOMParser-based stripper
 const processNoteContent = (html: string) => {
   if (!html) return { imageUrl: null, headingLevel: 0, headingLine: '', bodyPreview: '' };
@@ -65,9 +69,11 @@ const processNoteContent = (html: string) => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
   
+  // 1. Extract Cover Image
   const img = doc.querySelector('img');
   const imageUrl = img ? img.getAttribute('src') : null;
   
+  // 2. Find First Text Content
   let contentStartNode = doc.body.firstChild;
   while (contentStartNode && (
       (contentStartNode.nodeType !== Node.ELEMENT_NODE && !contentStartNode.textContent?.trim()) || 
@@ -85,6 +91,7 @@ const processNoteContent = (html: string) => {
       contentStartNode = contentStartNode.nextSibling;
   }
 
+  // 3. Generate Body Preview
   let bodyPreview = '';
   
   const walk = (node: Node) => {
@@ -138,7 +145,8 @@ const processNoteContent = (html: string) => {
                        const checkbox = child.querySelector('input[type="checkbox"]');
                        if (checkbox) {
                            const checked = checkbox.hasAttribute('checked');
-                           bodyPreview += checked ? '<span class="font-bold text-blue-600 dark:text-blue-400">▣</span> ' : '<span class="text-gray-400 dark:text-gray-500">▢</span> ';
+                           // FIX: Use updated SVG strings
+                           bodyPreview += checked ? CHECKED_SVG : UNCHECKED_SVG;
                            child.childNodes.forEach(c => { if (c.nodeName !== 'INPUT') walk(c); });
                        } else {
                            bodyPreview += '• ';
@@ -154,7 +162,6 @@ const processNoteContent = (html: string) => {
               return;
           }
           
-          // Handle Links
           if (tagName === 'a') {
               const href = el.getAttribute('href');
               if (href) {
@@ -232,7 +239,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return activeNotes.map(note => {
       const safeContent = note.content || ''; 
       let htmlContent = '';
-      try { htmlContent = marked.parse(safeContent, { breaks: true }) as string; } catch (e) { htmlContent = '<i>Error</i>'; }
+      try { 
+          htmlContent = marked.parse(safeContent, { breaks: true }) as string; 
+      } catch (e) { htmlContent = '<i>Error</i>'; }
       
       const { imageUrl, headingLevel, headingLine, bodyPreview } = processNoteContent(htmlContent);
       
@@ -277,7 +286,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
             const isSelected = selectedIds.has(note.id);
             const isDark = isDarkColor(note.color);
             
-            // Determine Border Color (5% lighter)
             const borderColor = note.color 
                 ? lightenColor(note.color, 5) 
                 : undefined;
@@ -287,7 +295,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
               key={note.id}
               className={`group relative flex flex-col justify-between rounded-lg shadow-md transition-all duration-200 border border-gray-200 dark:border-gray-700 h-full min-h-[180px] overflow-hidden ${isSelected ? 'ring-2 ring-blue-600 ring-offset-2 dark:ring-offset-gray-900' : 'hover:shadow-lg'}`}
               style={{ 
-                  // FIX: Gradient Background with 75% opacity (BF) on the color stop
                   background: note.color ? `linear-gradient(to bottom, #121826, ${note.color}BF)` : undefined,
                   backgroundColor: note.color ? undefined : undefined,
                   borderColor: borderColor || undefined
@@ -338,14 +345,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
               
               <div className="mt-4 flex items-center justify-between p-4 pt-0">
                   <div className="flex items-center gap-3">
-                      {/* FIX: White stroke for unselected circle if note has color */}
                       <div 
                         className={`w-[18px] h-[18px] rounded-full flex items-center justify-center cursor-pointer transition-all border-2 ${
                             isSelected 
                                 ? 'bg-blue-600 border-blue-600' 
                                 : (note.color 
-                                    ? 'bg-transparent border-white/80 hover:border-white' 
-                                    : 'bg-transparent border-gray-400 dark:border-gray-500 hover:border-blue-400')
+                                    ? 'bg-transparent border-white/80 hover:border-white hover:bg-white/10' 
+                                    : 'bg-transparent border-gray-400 dark:border-gray-500 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20')
                         }`}
                         onClick={(e) => { e.stopPropagation(); toggleSelection(note.id); }}
                       >
@@ -444,7 +450,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
       )}
 
-      {/* ... Modals ... */}
       {showCategoryModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-sm shadow-xl">
