@@ -1,0 +1,17 @@
+### VolumeVault21
+## Self hosted note taking app
+
+# Docker Compose
+```
+name: volumevault21
+services:
+  app:
+    image: volumedata21/volumevault21:latest
+    container_name: volumevault21
+    ports:
+      - "2100:2100"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    user: 1000:1000
+```
