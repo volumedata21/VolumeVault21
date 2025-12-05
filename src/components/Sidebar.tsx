@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Note } from '../types';
 import { Plus, Search, Trash2, X, Settings, ChevronDown, ChevronRight, Github, RotateCcw, AlertOctagon, AppWindow } from 'lucide-react';
 import { VariableSizeList as List, areEqual } from 'react-window';
@@ -38,58 +38,71 @@ interface RowData {
   onDeleteNote: (id: string) => void;
   onRestoreNote: (id: string) => void;
   onPermanentDeleteNote: (id: string) => void;
+  toggleCategory: (id: string) => void;
 }
 
 const Row = React.memo(({ index, style, data }: { index: number; style: React.CSSProperties; data: RowData }) => {
     const item = data.items[index];
 
+    // HEADER ROW
     if (item.type === 'header') {
-        return null; // Handled by inline renderer below
+        return (
+            <div style={style} className="px-2 pt-1">
+                <button
+                    onClick={() => data.toggleCategory(item.id)}
+                    className="w-full flex items-center gap-2 px-2 py-1 text-xs font-bold text-blue-600 dark:text-sky-400 hover:text-blue-800 dark:hover:text-sky-200 uppercase tracking-wider transition-colors"
+                >
+                    {item.expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {item.name} <span className="text-gray-400 font-normal">({item.count})</span>
+                </button>
+            </div>
+        );
     }
 
+    // NOTE ROW
     const note = item.note;
     const isSelected = data.currentNoteId === note.id;
 
     return (
-        <div style={style} className="px-2">
+        <div style={style} className="px-2 py-0.5"> 
            <button
               onClick={() => {
                   data.onSelectNote(note.id);
                   data.onCloseMobile(); 
               }}
               className={`
-                  relative block w-full text-left py-2 pl-8 pr-3 rounded-lg transition-colors 
+                  w-full h-full text-left pl-8 pr-3 rounded-lg transition-colors 
                   hover:bg-gray-100 dark:hover:bg-gray-800 
-                  group overflow-hidden
+                  group relative flex flex-col justify-center overflow-hidden
                   ${isSelected 
                       ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
                       : 'text-gray-700 dark:text-gray-300'}
               `}
           >
-              <div className="pr-6 overflow-hidden">
-                  <h3 className={`font-semibold text-sm truncate ${data.isTrash ? 'line-through text-gray-500' : ''}`}>
+              <div className="w-full min-w-0">
+                  <h3 className={`font-semibold text-sm truncate pr-6 ${data.isTrash ? 'line-through text-gray-500' : ''}`}>
                       {note.title || 'Untitled'}
                   </h3>
-                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 truncate">
                       {new Date(note.updatedAt).toLocaleDateString()}
                   </p>
               </div>
               
               {/* Hover Actions */}
-              <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:md:opacity-100 transition-opacity bg-inherit z-10">
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:md:opacity-100 transition-opacity z-10">
                   {!data.isTrash ? (
                       <div 
                           onClick={(e) => {
                               e.stopPropagation();
                               data.onDeleteNote(note.id);
                           }}
-                          className="p-1.5 text-gray-400 hover:text-red-700 dark:hover:text-red-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm shadow-sm"
+                          className="p-1.5 text-gray-400 hover:text-red-700 dark:hover:text-red-400 cursor-pointer rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm"
                           title="Move to Trash"
                       >
                           <Trash2 size={14} />
                       </div>
                   ) : (
-                      <div className="flex gap-1 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm rounded shadow-sm p-0.5">
+                      <div className="flex gap-1 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm rounded p-0.5">
                           <div 
                               onClick={(e) => {
                                   e.stopPropagation();
@@ -139,6 +152,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   searchTerm,
   onSearch
 }) => {
+  // NEW: Ref to the VariableSizeList instance
+  const listRef = useRef<List>(null);
+  
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [sortCriterion, setSortCriterion] = useState<'updatedAt' | 'title'>('updatedAt');
 
@@ -216,11 +232,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return items;
   }, [sortedCategories, expandedCategories, groupedNotes, categoryDisplayNames]);
 
+  // CRITICAL FIX: Reset list size cache when items change
+  // This forces react-window to re-calculate heights (Header vs Note) for every index
+  useEffect(() => {
+      if (listRef.current) {
+          listRef.current.resetAfterIndex(0);
+      }
+  }, [flatItems]); // Runs whenever filtering, sorting, or expanding/collapsing happens
+
   const getItemSize = (index: number) => {
       const item = flatItems[index];
       // Header: 36px
-      // Note: 60px
-      return item.type === 'header' ? 36 : 60; 
+      // Note: 68px
+      return item.type === 'header' ? 36 : 68; 
   };
 
   return (
@@ -229,7 +253,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       md:relative md:translate-x-0
     `}>
-      {/* Header - Centered Title */}
+      {/* Header */}
       <div className="relative p-4 border-b border-gray-200 dark:border-gray-800 flex justify-center items-center">
         <button 
             onClick={isTrash ? undefined : navigateToDashboard}
@@ -243,7 +267,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {isTrash ? 'Trash Bin' : 'VolumeVault21'}
         </button>
         
-        {/* Mobile Close Button - Absolutely positioned to right */}
         <button 
             onClick={onCloseMobile} 
             className="md:hidden absolute right-4 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400"
@@ -289,7 +312,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Dashboard Link - Centered Content */}
+      {/* Dashboard Link */}
       {!isTrash && (
         <div className="px-4 pb-2">
             <button
@@ -342,6 +365,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <AutoSizer>
                     {({ height, width }) => (
                         <List
+                            ref={listRef} // Attach ref to list
                             height={height - 40}
                             width={width}
                             itemCount={flatItems.length}
@@ -354,26 +378,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 onCloseMobile,
                                 onDeleteNote,
                                 onRestoreNote,
-                                onPermanentDeleteNote
+                                onPermanentDeleteNote,
+                                toggleCategory
                             }}
                         >
-                            {({ index, style, data }: any) => {
-                                const item = data.items[index];
-                                if (item.type === 'header') {
-                                    return (
-                                        <div style={style} className="px-2 pt-1">
-                                            <button
-                                                onClick={() => toggleCategory(item.id)}
-                                                className="w-full flex items-center gap-2 px-2 py-1 text-xs font-bold text-blue-600 dark:text-sky-400 hover:text-blue-800 dark:hover:text-sky-200 uppercase tracking-wider transition-colors"
-                                            >
-                                                {item.expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                                                {item.name} <span className="text-gray-400 font-normal">({item.count})</span>
-                                            </button>
-                                        </div>
-                                    );
-                                }
-                                return <Row index={index} style={style} data={data} />;
-                            }}
+                            {Row}
                         </List>
                     )}
                 </AutoSizer>
